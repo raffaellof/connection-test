@@ -160,7 +160,7 @@ Risolve 3 domini pubblici noti (`www.google.com`, `github.com`, `cloudflare.com`
 e verifica che gli indirizzi IP restituiti siano effettivamente pubblici.
 
 **Come fa:**
-Usa `asyncio.get_event_loop().getaddrinfo()` con timeout di 2 secondi per dominio.
+Usa `asyncio.get_running_loop().getaddrinfo()` con timeout di 2 secondi per dominio.
 Richiede almeno 2 risoluzioni con IP pubblici (non RFC 1918, non loopback,
 non link-local) per considerare il DNS funzionante.
 
