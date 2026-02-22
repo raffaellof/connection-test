@@ -1,6 +1,6 @@
 [build-system]
 requires = ["setuptools>=68", "wheel"]
-build-backend = "setuptools.backends.legacy:build"
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "connection-test"
@@ -14,6 +14,7 @@ authors = [
 requires-python = ">=3.7"
 dependencies = [
     "aiohttp>=3.8.0",
+    "certifi",
 ]
 keywords = [
     "network",
