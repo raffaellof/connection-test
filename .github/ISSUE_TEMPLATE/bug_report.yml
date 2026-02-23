@@ -1,0 +1,47 @@
+name: Bug Report
+description: Use this form to report a bug.
+title: "[BUG] "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for reporting a bug.
+  - type: input
+    id: summary
+    attributes:
+      label: Issue Summary
+      description: Provide a clear and concise description of the bug.
+      placeholder: Brief summary of the bug.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to Reproduce
+      description: List the steps to reproduce the issue.
+      placeholder: 1. Go to '...'\n2. Click on '...'\n3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+      description: Describe what was expected to happen.
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual Behavior
+      description: Describe what actually happened.
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment Details
+      description: Provide relevant environment details (OS, Python version, etc.).
+      placeholder: Operating system, Python version, etc.
+    validations:
+      required: false

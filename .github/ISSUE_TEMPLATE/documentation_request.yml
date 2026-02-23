@@ -1,0 +1,31 @@
+name: Documentation Request
+description: Use this form to request documentation improvements or additions.
+title: "[DOCS] "
+labels: [documentation]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for requesting documentation improvements.
+  - type: input
+    id: summary
+    attributes:
+      label: Documentation Summary
+      description: Provide a clear and concise summary of the documentation request.
+      placeholder: Brief summary of the documentation need.
+    validations:
+      required: true
+  - type: textarea
+    id: details
+    attributes:
+      label: Details
+      description: Describe what information is missing or unclear.
+    validations:
+      required: true
+  - type: textarea
+    id: suggestions
+    attributes:
+      label: Suggestions
+      description: Provide suggestions for improving the documentation.
+    validations:
+      required: false
