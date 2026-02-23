@@ -1,6 +1,6 @@
-# Contributing to connection-test
+# Contributing to advanced-connection-test
 
-Thank you for your interest in contributing to **connection-test**! Your help is welcome, whether you are reporting bugs, suggesting features, improving documentation, or submitting code.
+Thank you for your interest in contributing to **advanced-connection-test**! Your help is welcome, whether you are reporting bugs, suggesting features, improving documentation, or submitting code.
 
 ## How to Contribute
 
@@ -26,7 +26,7 @@ Thank you for your interest in contributing to **connection-test**! Your help is
    git clone https://github.com/raffaellof/connection-test.git
    cd connection-test
    ```
-2. Install dependencies:
+2. Install dependencies (includes `pytest`, `pytest-asyncio`, and `pytest-mock`):
    ```bash
    pip install -e ".[dev]"
    ```
@@ -34,6 +34,12 @@ Thank you for your interest in contributing to **connection-test**! Your help is
    ```bash
    pytest
    ```
+
+> **Note:** The test suite uses `async def` tests. The `pip install -e ".[dev]"` command
+> installs all required test dependencies automatically, including `pytest-asyncio`
+> (needed to run async tests) and `pytest-mock`. If tests fail with
+> *"async def functions are not natively supported"*, run `pip install -e ".[dev]"` again
+> to make sure all dev dependencies are installed in the active virtual environment.
 
 ## Guidelines
 
@@ -45,5 +51,5 @@ Thank you for your interest in contributing to **connection-test**! Your help is
 ## Need Help?
 If you have questions or need guidance, feel free to open a discussion or contact a maintainer.
 
-We appreciate your contributions to **connection-test**!
+We appreciate your contributions to **advanced-connection-test**!
 

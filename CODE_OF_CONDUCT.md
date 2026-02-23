@@ -27,5 +27,5 @@ If you experience or witness unacceptable behavior, please report it by opening 
 
 ## Our Standards
 
-As contributors and maintainers of the **connection-test** project, we pledge to foster an open, welcoming, diverse, inclusive, and harassment-free environment for everyone.
+As contributors and maintainers of the **advanced-connection-test** project, we pledge to foster an open, welcoming, diverse, inclusive, and harassment-free environment for everyone.
 
