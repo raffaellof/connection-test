@@ -1,13 +1,17 @@
-"""Test suite per connection_test.connection_checker.
+"""Test suite for connection_test.connection_checker.
 
-Copre tutti gli scenari di connettività tramite mock di aiohttp e socket,
+(EN) It covers all connectivity scenarios using aiohttp and socket mocks,
+ensuring that enhanced_connection_test() returns the correct ConnectionStatus
+under every simulated network condition.
+
+(IT) Copre tutti gli scenari di connettività tramite mock di aiohttp e socket,
 garantendo che enhanced_connection_test() restituisca il ConnectionStatus
 corretto in ogni condizione di rete simulata.
 
-Struttura:
+Structure:
     TestPhase1Socket   — Fase 1: test socket TCP (NO_CONNECTION)
     TestPhase2DNS      — Fase 2: test DNS (LAN_ONLY)
-    TestPhase3HTTP     — Fase 3: HTTP diretto (CONNECTED_DIRECT, SSL_ERROR)
+    TestPhase3HTTP     — Fase 3: HTTP direct (CONNECTED_DIRECT, SSL_ERROR)
     TestPhase4Proxy    — Fase 4: proxy (PROXY_AUTH_FAILED, CONNECTED_PROXY,
                                        PROXY_STALE, PROXY_REQUIRED)
     TestPhase5Captive  — Fase 5: captive portal (CAPTIVE_PORTAL)

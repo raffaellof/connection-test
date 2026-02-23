@@ -1,25 +1,25 @@
 # connection-test
 
-**connection-test** è un package Python per la diagnosi avanzata della connettività di rete.
-Permette di distinguere con precisione tra vari stati di rete — assenza di connessione, solo LAN,
-captive portal, proxy obbligatorio, errori SSL e connessione funzionante — in modo robusto,
-sicuro e trasparente.
+**connection-test** is a Python package for advanced network connectivity diagnostics.
+It allows you to accurately distinguish between various network states — no connection, LAN only,
+captive portal, mandatory proxy, SSL errors, and working connection — in a robust,
+safe, and transparent way.
 
-## Scopo
+## Purpose
 
-Fornire uno strumento affidabile per:
-- Diagnosticare problemi di rete in ambienti aziendali, pubblici o domestici.
-- Identificare rapidamente la causa di una mancata connessione a Internet.
-- Adattare il comportamento di un'applicazione in base allo stato reale della connettività.
-- Rilevare proxy obbligatori, captive portal e configurazioni obsolete.
+Provide a reliable tool to:
+- Diagnose network issues in corporate, public, or home environments.
+- Quickly identify the cause of a failed Internet connection.
+- Adapt an application's behavior based on the actual connectivity status.
+- Detect mandatory proxies, captive portals, and outdated configurations.
 
-## Installazione
+## Installation
 
 ```bash
 pip install connection-test
 ```
 
-Oppure, per sviluppo locale con dipendenze di test:
+Or, for local development with test dependencies:
 
 ```bash
 git clone https://github.com/raffaellof/connection-test.git
@@ -27,11 +27,11 @@ cd connection-test
 pip install -e ".[dev]"
 ```
 
-**Requisiti:** Python 3.7+, [aiohttp](https://pypi.org/project/aiohttp/) >= 3.8.0
+**Requirements:** Python 3.7+, [aiohttp](https://pypi.org/project/aiohttp/) >= 3.8.0
 
 ---
 
-## Utilizzo rapido
+## Quick Usage
 
 ```python
 import asyncio
@@ -42,29 +42,28 @@ result = asyncio.run(enhanced_connection_test())
 if result.status == ConnectionStatus.CONNECTED_DIRECT:
     print(f"Online in {result.test_duration_ms}ms")
 elif result.status == ConnectionStatus.CAPTIVE_PORTAL:
-    print(f"Captive portal rilevato: {result.captive_portal_url}")
+    print(f"Captive portal detected: {result.captive_portal_url}")
 elif result.status == ConnectionStatus.PROXY_REQUIRED:
-    print(f"Proxy necessario: {result.detected_proxy_url}")
+    print(f"Proxy required: {result.detected_proxy_url}")
 elif result.status == ConnectionStatus.PROXY_AUTH_FAILED:
-    print("Credenziali proxy errate o mancanti")
+    print("Proxy credentials incorrect or missing")
 elif result.status == ConnectionStatus.SSL_ERROR:
-    print("Errore SSL — controlla data/ora di sistema")
+    print("SSL error — check system date/time")
 elif result.status == ConnectionStatus.LAN_ONLY:
-    print("Rete locale OK, ma Internet non raggiungibile")
+    print("Local network OK, but Internet unreachable")
 elif result.status == ConnectionStatus.NO_CONNECTION:
-    print("Nessuna rete rilevata")
+    print("No network detected")
 ```
 
-### Con URL personalizzati
+### With Custom URLs
 
-Utile su reti con proxy che bloccano alcuni siti ma non altri: passa gli URL
-critici per la tua applicazione invece di affidarti alla lista di default.
+Useful on networks where proxies block some sites but not others: pass the critical URLs for your application instead of relying on the default list.
 
 ```python
 from connection_test import enhanced_connection_test, ConnectionTestConfig
 
 config = ConnectionTestConfig(
-    test_urls=["https://mia-api.azienda.it", "https://www.google.com"],
+    test_urls=["https://my-api.company.com", "https://www.google.com"],
     timeout=10,
     global_timeout=30,
 )
@@ -72,10 +71,10 @@ result = asyncio.run(enhanced_connection_test(config=config))
 print(result.status.value, result.message)
 ```
 
-### Modalità diagnostica
+### Diagnostic Mode
 
-Testa tutti gli URL della lista (invece di uscire al primo successo) e restituisce
-il dettaglio per ciascuno:
+Tests all URLs in the list (instead of exiting on the first success) and returns
+details for each:
 
 ```python
 result = asyncio.run(enhanced_connection_test(test_all_urls=True))
@@ -85,185 +84,182 @@ for url_result in result.details.get("results_per_url", []):
 
 ---
 
-## Stati possibili (`ConnectionStatus`)
+## Possible States (`ConnectionStatus`)
 
-| Stato | Descrizione | `requires_action` |
+| State | Description | `requires_action` |
 |---|---|---|
-| `CONNECTED_DIRECT` | Connessione Internet funzionante (diretta o proxy trasparente) | No |
-| `CONNECTED_PROXY` | Connessione funzionante tramite proxy configurato | No |
-| `NO_CONNECTION` | Nessuna interfaccia di rete attiva | No |
-| `LAN_ONLY` | Rete locale OK, Internet non raggiungibile (DNS fallisce) | No |
-| `CAPTIVE_PORTAL` | Accesso bloccato da portale di autenticazione | **Sì** |
-| `CAPTIVE_PORTAL_PROXY` | Captive portal raggiungibile solo tramite proxy *(riservato, non ancora emesso)* | **Sì** |
-| `PROXY_REQUIRED` | Proxy necessario ma non configurato (rilevato su porta locale) | **Sì** |
-| `PROXY_AUTH_FAILED` | Proxy configurato (o rilevato) ma autenticazione fallita (HTTP 407) | **Sì** |
-| `PROXY_STALE` | Configurazione proxy obsoleta; la connessione diretta ora funziona | **Sì** |
-| `SSL_ERROR` | Errori SSL su tutti gli URL (orologio di sistema, certificati root) | **Sì** |
-| `UNKNOWN_ERROR` | Stato non determinabile o timeout globale superato | No |
+| `CONNECTED_DIRECT` | Working Internet connection (direct or transparent proxy) | No |
+| `CONNECTED_PROXY` | Working connection via configured proxy | No |
+| `NO_CONNECTION` | No active network interface | No |
+| `LAN_ONLY` | Local network OK, Internet unreachable (DNS fails) | No |
+| `CAPTIVE_PORTAL` | Access blocked by authentication portal | **Yes** |
+| `CAPTIVE_PORTAL_PROXY` | Captive portal reachable only via proxy *(reserved, not yet issued)* | **Yes** |
+| `PROXY_REQUIRED` | Proxy required but not configured (detected on local port) | **Yes** |
+| `PROXY_AUTH_FAILED` | Proxy configured (or detected) but authentication failed (HTTP 407) | **Yes** |
+| `PROXY_STALE` | Outdated proxy configuration; direct connection now works | **Yes** |
+| `SSL_ERROR` | SSL errors on all URLs (system clock, root certificates) | **Yes** |
+| `UNKNOWN_ERROR` | State undetectable or global timeout exceeded | No |
 
-> **Nota:** `detected_proxy_url` nei risultati contiene sempre l'URL del proxy con le
-> credenziali mascherate (`http://***@host:port`), mai in chiaro.
-
----
-
-## Architettura — Fasi di test
-
-Il test esegue fino a **6 fasi** sequenziali (Phase 0–5) con early-exit al primo risultato conclusivo.
+> **Note:** `detected_proxy_url` in the results always contains the proxy URL with
+> masked credentials (`http://***@host:port`), never in clear text.
 
 ---
 
-### Phase 0 — Pre-check variabili proxy
+## Architecture — Test Phases
 
-**Cosa fa:**
-Prima di iniziare qualsiasi test di rete, legge le variabili d'ambiente
-`HTTP_PROXY`, `HTTPS_PROXY` (e le varianti lowercase) per sapere se un proxy
-è già configurato.
-
-**Come fa:**
-Legge `os.getenv()` e calcola `safe_proxy_url` (URL mascherato) per il logging.
-Non esegue alcuna richiesta di rete. Le informazioni raccolte vengono usate
-nelle fasi 3 e 4.
-
-**Perché:**
-Separare la lettura delle env vars dall'esecuzione permette di avere sempre
-`safe_proxy_url` disponibile per i log anche in caso di timeout globale
-(il `partial_state` viene aggiornato subito).
-
-**Esito:** Nessuno — fase preparatoria, prosegue sempre.
+The test runs up to **6 sequential phases** (Phase 0–5) with early-exit on the first conclusive result.
 
 ---
 
-### Phase 1 — Socket TCP
+### Phase 0 — Proxy Variable Pre-check
 
-**Cosa fa:**
-Verifica se almeno un'interfaccia di rete è attiva tentando una connessione TCP
-a `8.8.8.8:53` (server DNS pubblico di Google).
+**What it does:**
+Before starting any network test, it reads the environment variables
+`HTTP_PROXY`, `HTTPS_PROXY` (and lowercase variants) to know if a proxy
+is already configured.
 
-**Come fa:**
-Crea un socket `SOCK_STREAM` (TCP) con timeout di 1 secondo. Il three-way handshake
-TCP conferma che il pacchetto raggiunge effettivamente la destinazione.
+**How:**
+Reads `os.getenv()` and computes `safe_proxy_url` (masked URL) for logging.
+Does not perform any network request. The collected information is used
+in phases 3 and 4.
 
-**Perché:**
-È il test più rapido e basilare. Un fallimento qui indica problemi a livello fisico:
-cavo scollegato, Wi-Fi disattivato, driver di rete non funzionante.
-UDP (`SOCK_DGRAM`) non viene usato perché `socket.connect()` con UDP non invia
-dati né verifica la raggiungibilità, restituendo sempre successo anche senza rete.
+**Why:**
+Separating env var reading from execution ensures `safe_proxy_url` is always
+available for logs even in case of global timeout (the `partial_state` is updated immediately).
 
-**Esito:** `NO_CONNECTION` se fallisce.
-
----
-
-### Phase 2 — Risoluzione DNS
-
-**Cosa fa:**
-Risolve 3 domini pubblici noti (`www.google.com`, `github.com`, `cloudflare.com`)
-e verifica che gli indirizzi IP restituiti siano effettivamente pubblici.
-
-**Come fa:**
-Usa `asyncio.get_running_loop().getaddrinfo()` con timeout di 2 secondi per dominio.
-Richiede almeno 2 risoluzioni con IP pubblici (non RFC 1918, non loopback,
-non link-local) per considerare il DNS funzionante.
-
-**Perché:**
-Reti aziendali con DNS split-horizon possono rispondere a qualsiasi query con IP
-interni, simulando un DNS funzionante pur non avendo accesso a Internet. La soglia
-di 2 domini su 3 tolera un singolo endpoint temporaneamente irraggiungibile.
-
-**Esito:** `LAN_ONLY` se fallisce.
+**Outcome:** None — preparatory phase, always proceeds.
 
 ---
 
-### Phase 3 — HTTP diretto
+### Phase 1 — TCP Socket
 
-**Cosa fa:**
-Effettua richieste HTTPS agli URL configurati senza proxy, verificando status 2xx
-e corrispondenza del dominio tra URL richiesto e URL finale della risposta.
+**What it does:**
+Checks if at least one network interface is active by attempting a TCP connection
+to `8.8.8.8:53` (Google's public DNS server).
 
-**Come fa:**
-Usa `aiohttp.ClientSession` con `unset_proxy_env_async()` per disabilitare
-temporaneamente le variabili proxy di sistema e garantire un test davvero diretto.
-Supporta due modalità: **performance** (early-exit al primo successo) e
-**diagnostica** (`test_all_urls=True`, testa tutti gli URL).
+**How:**
+Creates a `SOCK_STREAM` (TCP) socket with a 1-second timeout. The TCP three-way handshake
+confirms that the packet actually reaches the destination.
 
-**Perché:**
-Verifica la connettività applicativa reale. Il domain match rileva i redirect
-cross-domain tipici dei captive portal. Il conteggio separato degli errori SSL
-permette di distinguere `SSL_ERROR` da altri fallimenti.
+**Why:**
+This is the fastest and most basic test. Failure here indicates physical layer issues:
+unplugged cable, Wi-Fi off, non-working network driver.
+UDP (`SOCK_DGRAM`) is not used because `socket.connect()` with UDP does not send
+data nor verify reachability, always returning success even without a network.
 
-**Esiti:** `CONNECTED_DIRECT` (successo), `SSL_ERROR` (tutti gli URL tentati
-hanno restituito errori SSL — in modalità performance si confronta con gli URL
-effettivamente tentati, non con la lista completa), oppure prosegue alla fase
-successiva.
+**Outcome:** `NO_CONNECTION` if it fails.
+
+---
+
+### Phase 2 — DNS Resolution
+
+**What it does:**
+Resolves 3 well-known public domains (`www.google.com`, `github.com`, `cloudflare.com`)
+and checks that the returned IP addresses are actually public.
+
+**How:**
+Uses `asyncio.get_running_loop().getaddrinfo()` with a 2-second timeout per domain.
+Requires at least 2 resolutions with public IPs (not RFC 1918, not loopback,
+not link-local) to consider DNS working.
+
+**Why:**
+Corporate networks with split-horizon DNS may respond to any query with internal IPs,
+simulating a working DNS even without Internet access. The 2 out of 3 threshold
+tolerates a single temporarily unreachable endpoint.
+
+**Outcome:** `LAN_ONLY` if it fails.
+
+---
+
+### Phase 3 — Direct HTTP
+
+**What it does:**
+Performs HTTPS requests to the configured URLs without a proxy, checking for 2xx status
+and domain match between requested URL and final response URL.
+
+**How:**
+Uses `aiohttp.ClientSession` with `unset_proxy_env_async()` to temporarily disable
+system proxy environment variables and ensure a truly direct test.
+Supports two modes: **performance** (early-exit on first success) and
+**diagnostic** (`test_all_urls=True`, tests all URLs).
+
+**Why:**
+Verifies real application connectivity. Domain match detects cross-domain redirects
+typical of captive portals. Separate SSL error counting allows distinguishing
+`SSL_ERROR` from other failures.
+
+**Outcomes:** `CONNECTED_DIRECT` (success), `SSL_ERROR` (all attempted URLs
+returned SSL errors — in performance mode, only the actually attempted URLs are considered),
+or proceeds to the next phase.
 
 ---
 
 ### Phase 4 — Proxy
 
-**Cosa fa:**
-Se `HTTP_PROXY`/`HTTPS_PROXY` sono configurate, testa il proxy. Altrimenti,
-scansiona le porte locali 8080, 3128 e 8888 cercando un proxy non dichiarato.
+**What it does:**
+If `HTTP_PROXY`/`HTTPS_PROXY` are configured, tests the proxy. Otherwise,
+scans local ports 8080, 3128, and 8888 looking for an undeclared proxy.
 
-**Come fa:**
-- *Proxy configurato:* invia le stesse richieste HTTPS passando il proxy.
-  Un HTTP 407 indica autenticazione richiesta. Se il proxy fallisce ma la
-  connessione diretta ora funziona, il proxy è obsoleto (`PROXY_STALE`): in
-  questo caso `suggested_route` è `/settings/proxy` (non `/proxy_login`) perché
-  l'azione corretta è **rimuovere** la configurazione proxy, non fare login.
-- *Scansione porte:* usa `asyncio.open_connection()` con timeout 0.5s per
-  porta. Ogni porta aperta viene validata con una richiesta HTTP reale attraverso
-  di essa. Un HTTP 407 dal proxy rilevato via scan restituisce `PROXY_AUTH_FAILED`
-  con `suggested_route='/proxy_login'`. Se la porta è aperta ma non è un proxy
-  (es. server di sviluppo), la scansione continua silenziosamente.
+**How:**
+- *Configured proxy:* sends the same HTTPS requests through the proxy.
+  An HTTP 407 indicates authentication required. If the proxy fails but direct
+  connection now works, the proxy is stale (`PROXY_STALE`): in this case
+  `suggested_route` is `/settings/proxy` (not `/proxy_login`) because the correct
+  action is to **remove** the proxy configuration, not to log in.
+- *Port scan:* uses `asyncio.open_connection()` with a 0.5s timeout per port.
+  Each open port is validated with a real HTTP request through it. An HTTP 407
+  from a proxy detected via scan returns `PROXY_AUTH_FAILED` with
+  `suggested_route='/proxy_login'`. If the port is open but not a proxy (e.g.,
+  development server), the scan continues silently.
 
-**Perché:**
-In reti aziendali l'accesso diretto è spesso bloccato e il proxy è obbligatorio.
-La scansione porte rileva proxy installati localmente ma non configurati nelle
-variabili d'ambiente (es. Squid, Charles, Burp Suite).
+**Why:**
+In corporate networks, direct access is often blocked and a proxy is mandatory.
+Port scanning detects locally installed proxies not configured in environment variables
+(e.g., Squid, Charles, Burp Suite).
 
-**Esiti:** `CONNECTED_PROXY`, `PROXY_AUTH_FAILED` (da proxy configurato o da
-proxy rilevato via scan), `PROXY_STALE`, `PROXY_REQUIRED`.
-
----
-
-### Phase 5 — Captive portal
-
-**Cosa fa:**
-Interroga 3 endpoint HTTP dedicati per rilevare la presenza di un captive portal
-tramite majority vote.
-
-**Come fa:**
-Invia richieste HTTP (non HTTPS, deliberatamente intercettabili) a:
-- Google: `connectivitycheck.gstatic.com/generate_204` → atteso HTTP 204
-- Microsoft: `msftconnecttest.com/connecttest.txt` → atteso corpo `"Microsoft Connect Test"`
-- Firefox: `detectportal.firefox.com/success.txt` → atteso corpo `"success"`
-
-Se ≥50% dei test *conclusivi* indica intercettazione, il captive portal è confermato.
-
-**Perché:**
-Un singolo endpoint potrebbe essere temporaneamente irraggiungibile (CDN down,
-firewall aziendale) causando falsi positivi. Tre vendor indipendenti con majority
-vote riducono drasticamente questa possibilità. Le richieste usano HTTP perché i
-captive portal intercettano solo il traffico in chiaro — HTTPS non può essere
-alterato senza che il certificato riveli l'intercettazione.
-
-**Esito:** `CAPTIVE_PORTAL` se confermato, `UNKNOWN_ERROR` come fallback finale.
+**Outcomes:** `CONNECTED_PROXY`, `PROXY_AUTH_FAILED` (from configured or scanned proxy),
+`PROXY_STALE`, `PROXY_REQUIRED`.
 
 ---
 
-## Caratteristiche di sicurezza
+### Phase 5 — Captive Portal
 
-- **Nessuna credenziale nei log** — tutti i proxy URL vengono mascherati tramite
-  `_mask_proxy_credentials()` prima di qualsiasi output di logging.
-- **SSL certificate verification abilitato** — tutte le richieste HTTPS usano
-  verifica del certificato per default.
-- **Timeout su ogni operazione** — socket (1s), DNS (2s/dominio), HTTP (5s,
-  configurabile), globale (60s, configurabile). Nessuna operazione può bloccarsi.
-- **Lock asincrono su `os.environ`** — previene race condition in contesti
-  concorrenti che modificano simultaneamente le variabili proxy di sistema.
+**What it does:**
+Queries 3 dedicated HTTP endpoints to detect the presence of a captive portal
+using majority vote.
+
+**How:**
+Sends HTTP requests (not HTTPS, deliberately interceptable) to:
+- Google: `connectivitycheck.gstatic.com/generate_204` → expected HTTP 204
+- Microsoft: `msftconnecttest.com/connecttest.txt` → expected body `"Microsoft Connect Test"`
+- Firefox: `detectportal.firefox.com/success.txt` → expected body `"success"`
+
+If ≥50% of *conclusive* tests indicate interception, the captive portal is confirmed.
+
+**Why:**
+A single endpoint may be temporarily unreachable (CDN down, corporate firewall)
+causing false positives. Three independent vendors with majority vote drastically
+reduce this possibility. Requests use HTTP because captive portals only intercept
+cleartext traffic — HTTPS cannot be altered without the certificate revealing the interception.
+
+**Outcome:** `CAPTIVE_PORTAL` if confirmed, `UNKNOWN_ERROR` as final fallback.
 
 ---
 
-## API di riferimento
+## Security Features
+
+- **No credentials in logs** — all proxy URLs are masked via
+  `_mask_proxy_credentials()` before any logging output.
+- **SSL certificate verification enabled** — all HTTPS requests use
+  certificate verification by default.
+- **Timeout on every operation** — socket (1s), DNS (2s/domain), HTTP (5s,
+  configurable), global (60s, configurable). No operation can hang.
+- **Async lock on `os.environ`** — prevents race conditions in concurrent
+  contexts that simultaneously modify system proxy variables.
+
+---
+
+## Reference API
 
 ### `enhanced_connection_test()`
 
@@ -277,13 +273,13 @@ async def enhanced_connection_test(
 ) -> ConnectionTestResult
 ```
 
-| Parametro | Tipo | Default | Descrizione |
+| Parameter | Type | Default | Description |
 |---|---|---|---|
-| `config` | `ConnectionTestConfig` | `None` | Oggetto di configurazione (ha precedenza sui parametri singoli) |
-| `test_urls` | `List[str]` | `None` | URL da testare (default: GitHub, Google, PyPI, npm) |
-| `timeout` | `int` | `5` | Timeout per ogni richiesta HTTP (secondi) |
-| `test_all_urls` | `bool` | `False` | Se `True`, modalità diagnostica (testa tutti gli URL) |
-| `global_timeout` | `int` | `60` | Timeout massimo per l'intera funzione (secondi) |
+| `config` | `ConnectionTestConfig` | `None` | Configuration object (takes precedence over single parameters) |
+| `test_urls` | `List[str]` | `None` | URLs to test (default: GitHub, Google, PyPI, npm) |
+| `timeout` | `int` | `5` | Timeout for each HTTP request (seconds) |
+| `test_all_urls` | `bool` | `False` | If `True`, diagnostic mode (tests all URLs) |
+| `global_timeout` | `int` | `60` | Maximum timeout for the entire function (seconds) |
 
 ### `ConnectionTestConfig`
 
@@ -300,30 +296,31 @@ config = ConnectionTestConfig(
 
 ### `ConnectionTestResult`
 
-Il risultato contiene:
-- `status` — valore di `ConnectionStatus`
-- `message` — descrizione in italiano per l'utente finale
-- `details` — dizionario con informazioni tecniche (url testato, durata, tipo di errore, ecc.)
-- `requires_action` — `True` se è richiesta un'azione dell'utente
-- `suggested_route` — percorso suggerito (es. `'/proxy_login'`, `'/auth/captive_portal'`)
-- `detected_proxy_url` — URL del proxy rilevato (credenziali mascherate)
-- `captive_portal_url` — URL del captive portal intercettato
-- `test_duration_ms` — durata totale in millisecondi
+The result contains:
+- `status` — value of `ConnectionStatus`
+- `message` — description in English for the end user
+- `details` — dictionary with technical information (tested URL, duration, error type, etc.)
+- `requires_action` — `True` if user action is required
+- `suggested_route` — suggested path (e.g., `'/proxy_login'`, `'/auth/captive_portal'`)
+- `detected_proxy_url` — detected proxy URL (masked credentials)
+- `captive_portal_url` — intercepted captive portal URL
+- `test_duration_ms` — total duration in milliseconds
 
 ---
 
-## Glossario
+## Glossary
 
-- **LAN (Local Area Network):** Rete locale, tipicamente limitata a un edificio o ufficio.
-- **Captive portal:** Sistema che blocca l'accesso a Internet finché l'utente non si autentica tramite una pagina web dedicata (tipico di hotel, aeroporti, università).
-- **Proxy autenticato:** Proxy che richiede username e password per l'accesso (HTTP 407).
-- **Proxy trasparente:** Proxy che intercetta il traffico senza che il client sia configurato per usarlo.
-- **DNS split-horizon:** Configurazione DNS che restituisce risposte diverse in base alla rete di origine della query (interna vs. esterna).
-- **Majority vote:** Tecnica di consenso che richiede l'accordo di almeno la metà dei partecipanti per prendere una decisione — usata per il rilevamento del captive portal.
-- **Timeout:** Tempo massimo di attesa per una risposta prima di considerare l'operazione fallita.
+- **LAN (Local Area Network):** Local network, typically limited to a building or office.
+- **Captive portal:** System that blocks Internet access until the user authenticates via a dedicated web page (common in hotels, airports, universities).
+- **Authenticated proxy:** Proxy requiring username and password for access (HTTP 407).
+- **Transparent proxy:** Proxy that intercepts traffic without the client being configured to use it.
+- **Split-horizon DNS:** DNS configuration that returns different responses based on the network origin of the query (internal vs. external).
+- **Majority vote:** Consensus technique requiring agreement from at least half of participants to make a decision — used for captive portal detection.
+- **Timeout:** Maximum wait time for a response before considering the operation failed.
 
 ---
 
-## Licenza
+## License
 
-MIT — vedi [LICENSE](LICENSE)
+MIT — see [LICENSE](LICENSE)
+

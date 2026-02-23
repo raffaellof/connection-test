@@ -1,45 +1,116 @@
-"""Connection Checker — modulo di diagnosi avanzata della connettività di rete.
+"""Connection Checker — Advanced Network Connectivity Diagnostics Module.
 
+(EN)
+It provides a multi-phase analysis of the connection state, accurately distinguishing
+between scenarios such as no network, LAN only, captive portal, mandatory
+proxy, SSL errors, and working connection (direct or via proxy).
+
+Designed for use by applications that need to adapt their
+behavior based on the actual connectivity status.
+
+Architecture:
+    The test is divided into 6 sequential phases (Phase 0–5) with an early exit on the first success:
+
+    Phase 0 — Pre-check proxy variables (preparatory):
+        Reads the HTTP_PROXY/HTTPS_PROXY environment variables before any
+        network tests. Does not execute requests. Calculates safe_proxy_url for logging
+        and updates partial_state for global timeout tracking.
+        Does not produce any results: always continues.
+
+    Phase 1 — Socket (physical/transport layer):
+        Checks for the presence of an active network interface via a TCP connection
+        to a public DNS server. Fails only if no local network exists.
+
+    Phase 2 — DNS (Network Layer):
+        Resolves multiple known public domains and verifies that the obtained IPs are
+        true public (not local DNS responses from corporate networks).
+        Requires at least two valid resolutions on separate domains.
+
+    Phase 3 — Direct HTTP (Application Layer):
+        Attempts HTTPS requests to configured URLs without a proxy. Only 2xx responses on the same requested domain are
+        considered valid. Supports diagnostic mode (testing all URLs) and performance mode (early exit).
+
+    Phase 4 — Proxy (Detection and Test):
+        If the HTTP_PROXY/HTTPS_PROXY environment variables are configured,
+        it tests them directly. If not configured, it scans common
+        ports (8080, 3128, 8888) with validation via a real HTTP request.
+
+    Phase 5 — Captive portal (majority vote detection):
+        Query 3 dedicated endpoints (Google, Microsoft, Firefox) and use the
+        majority vote (>=50% of the final tests) to determine the
+        presence of a captive portal, avoiding false positives from down endpoints.
+
+States:
+    NO_CONNECTION: No active network interface (cable unplugged, Wi-Fi off).
+    LAN_ONLY: Local network working, Internet unreachable (DNS fails).
+    CAPTIVE_PORTAL: Access blocked by authentication portal (hotel, airport).
+    CAPTIVE_PORTAL_PROXY: Captive portal detected behind a proxy.
+    PROXY_REQUIRED: Proxy required to access the Internet (corporate network).
+    PROXY_AUTH_FAILED: Proxy configured but authentication failed (407).
+    PROXY_STALE: Outdated proxy configuration; direct connection now works.
+    SSL_ERROR: SSL errors on all tested URLs (system clock, root cert).
+    CONNECTED_DIRECT: Internet connection working, either directly or via a transparent proxy.
+    CONNECTED_PROXY: Internet connection working via an explicitly configured proxy.
+    UNKNOWN_ERROR: Undetermined status; returned even if a global timeout occurs.
+
+Dependencies:
+    External:
+        aiohttp >= 3.8.0 — Asynchronous HTTP client (https://docs.aiohttp.org)
+    Standard library:
+        asyncio, logging, os, socket, contextlib, dataclasses, enum, typing, urllib.parse
+
+Security:
+    - No sensitive data in logs: Credentials in URL proxies are always
+    masked via _mask_proxy_credentials() before any output.
+    - Hanging protection: Configurable timeout for each HTTP request and
+    global timeout for the entire enhanced_connection_test function.
+    - SSL error detection: Distinguishes certificate/clock errors from
+    other connection errors, returning ConnectionStatus.SSL_ERROR.
+    - Asynchronous locking on os.environ: prevents race conditions when
+    temporarily modifying proxy variables in concurrent contexts.
+    - Certificate verification enabled by default on all HTTPS requests.
+
+(IT)
 Fornisce un'analisi multi-fase dello stato della connessione, distinguendo con
 precisione tra scenari come assenza di rete, solo LAN, captive portal, proxy
 obbligatorio, errori SSL e connessione funzionante (diretta o tramite proxy).
 Progettato per essere utilizzato da applicazioni che devono adattare il proprio
 comportamento in base allo stato reale della connettività.
 
-Architecture:
+Architettura:
     Il test si articola in 6 fasi sequenziali (Phase 0–5) con early-exit al primo successo:
 
-    Phase 0 — Pre-check variabili proxy (preparatoria):
+    Fase 0 — Pre-check variabili proxy (preparatoria):
         Legge le variabili d'ambiente HTTP_PROXY/HTTPS_PROXY prima di qualsiasi
         test di rete. Non esegue richieste. Calcola safe_proxy_url per il logging
         e aggiorna partial_state per il tracking del timeout globale.
         Non produce alcun esito: prosegue sempre.
 
-    Phase 1 — Socket (livello fisico/trasporto):
+    Fase 1 — Socket (livello fisico/trasporto):
         Verifica la presenza di un'interfaccia di rete attiva tramite connessione
         TCP a un server DNS pubblico. Fallisce solo se non esiste alcuna rete locale.
 
-    Phase 2 — DNS (livello rete):
+    Fase 2 — DNS (livello rete):
         Risolve più domini pubblici noti e verifica che gli IP ottenuti siano
         effettivamente pubblici (non risposte DNS locali di reti aziendali).
         Richiede almeno 2 risoluzioni valide su domini distinti.
 
-    Phase 3 — HTTP diretto (livello applicativo):
+    Fase 3 — HTTP diretto (livello applicativo):
         Tenta richieste HTTPS agli URL configurati senza proxy. Considera valide
         solo risposte 2xx sullo stesso dominio richiesto. Supporta modalità
         diagnostica (test di tutti gli URL) e modalità performance (early-exit).
 
-    Phase 4 — Proxy (rilevamento e test):
+    Fase 4 — Proxy (rilevamento e test):
         Se le variabili d'ambiente HTTP_PROXY/HTTPS_PROXY sono configurate, le
         testa direttamente. In assenza di configurazione, scansiona le porte
         comuni (8080, 3128, 8888) con validazione tramite richiesta HTTP reale.
 
-    Phase 5 — Captive portal (rilevamento via majority vote):
+    Fase 5 — Captive portal (rilevamento via majority vote):
         Interroga 3 endpoint dedicati (Google, Microsoft, Firefox) e usa il
         voto di maggioranza (>=50% dei test conclusivi) per determinare la
         presenza di un captive portal, evitando falsi positivi da endpoint down.
 
-States:
+Stati:
     NO_CONNECTION:       Nessuna interfaccia di rete attiva (cavo scollegato, Wi-Fi off).
     LAN_ONLY:            Rete locale funzionante, Internet non raggiungibile (DNS fallisce).
     CAPTIVE_PORTAL:      Accesso bloccato da portale di autenticazione (hotel, aeroporto).
@@ -52,13 +123,13 @@ States:
     CONNECTED_PROXY:     Connessione Internet funzionante tramite proxy esplicitamente configurato.
     UNKNOWN_ERROR:       Stato indeterminabile; restituito anche in caso di timeout globale.
 
-Dependencies:
-    External:
+Dipendenze:
+    Esterne:
         aiohttp >= 3.8.0  — HTTP client asincrono (https://docs.aiohttp.org)
     Standard library:
         asyncio, logging, os, socket, contextlib, dataclasses, enum, typing, urllib.parse
 
-Security:
+Sicurezza:
     - Nessun dato sensibile nei log: le credenziali nei proxy URL sono sempre
       mascherate tramite _mask_proxy_credentials() prima di qualsiasi output.
     - Protezione da hanging: timeout configurabile per ogni richiesta HTTP e
@@ -94,22 +165,29 @@ try:
     import certifi
     _CERTIFI_AVAILABLE = True
 except ImportError:
+    certifi = None
     _CERTIFI_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
 
 def _make_ssl_context() -> ssl.SSLContext:
-    """Crea un SSLContext con il bundle di certificati root corretto.
+    """Create an SSLContext with the correct root certificate bundle.
 
-    Se ``certifi`` è installato usa il suo bundle (aggiornato indipendentemente
+    (EN) If ``certifi`` is installed, use its bundle (updated independently of the operating system).
+    Otherwise, use the default Python bundle.
+    This fixes the issue where ``aiohttp`` on some virtual environments
+    cannot find system root certificates.
+
+    (IT) Se ``certifi`` è installato usa il suo bundle (aggiornato indipendentemente
     dal sistema operativo). Altrimenti usa il bundle di default di Python.
     Questo risolve il problema per cui ``aiohttp`` su alcuni ambienti virtuali
     non riesce a trovare i certificati root di sistema.
 
     Returns:
-        ssl.SSLContext: Contesto SSL con verifica certificati abilitata.
+        ssl.SSLContext: SSL context with certificate verification enabled.
     """
+
     if _CERTIFI_AVAILABLE:
         return ssl.create_default_context(cafile=certifi.where())
     return ssl.create_default_context()
@@ -125,51 +203,52 @@ _proxy_env_lock = asyncio.Lock()
 
 
 class ConnectionStatus(Enum):
-    """Stati possibili della connettività di rete, rilevati da enhanced_connection_test.
+    """Possible states of network connectivity, detected by enhanced_connection_test.
 
-    Ogni valore rappresenta uno scenario distinto che l'applicazione chiamante
-    può usare per adattare il proprio comportamento (es. mostrare una pagina di
-    login proxy, avvisare l'utente di un captive portal, disabilitare funzioni
-    online, ecc.).
+    (EN) Each value represents a distinct scenario that the calling application
+    can use to adapt its behavior (e.g., show proxy login page, warn user of
+    captive portal, disable online features, etc.).
+
+    (IT) Ogni valore rappresenta uno scenario distinto che l'applicazione
+    chiamante può usare per adattare il proprio comportamento (es. mostrare
+    una pagina di login proxy, avvisare l'utente di un captive portal,
+    disabilitare funzioni online, ecc.).
 
     Attributes:
-        NO_CONNECTION: Nessuna interfaccia di rete attiva. Il test socket TCP
-            fallisce immediatamente. Cause tipiche: cavo scollegato, Wi-Fi
-            disattivato, driver di rete non funzionante.
-        LAN_ONLY: Rete locale funzionante (socket OK) ma Internet non
-            raggiungibile. La risoluzione DNS fallisce o restituisce solo IP
-            privati. Cause tipiche: router spento, DHCP senza gateway, DNS
-            aziendale che non risolve domini pubblici.
-        CAPTIVE_PORTAL: Accesso a Internet bloccato da un portale di
-            autenticazione (hotel, aeroporto, università). Le richieste HTTP
-            vengono intercettate e reindirizzate. Richiede apertura browser
-            per autenticarsi.
-        CAPTIVE_PORTAL_PROXY: Variante di CAPTIVE_PORTAL in cui il portale
-            è raggiungibile solo tramite proxy. Scenario raro ma presente in
-            alcune reti aziendali con doppio layer di autenticazione.
-        PROXY_REQUIRED: La rete richiede un proxy per accedere a Internet ma
-            non è configurato (o è configurato ma non funzionante). Rilevato
-            tramite scansione delle porte comuni (8080, 3128, 8888).
-        PROXY_AUTH_FAILED: Il proxy è configurato e raggiungibile ma
-            l'autenticazione fallisce (HTTP 407 Proxy Authentication Required).
-            Le credenziali sono mancanti, scadute o errate.
-        PROXY_STALE: La configurazione proxy era valida in precedenza ma ora
-            è obsoleta: il proxy non risponde ma la connessione diretta
-            funziona. L'applicazione dovrebbe rimuovere la configurazione proxy.
-        SSL_ERROR: Tutti gli URL testati restituiscono errori SSL/TLS. Cause
-            tipiche: orologio di sistema non sincronizzato (NTP), certificati
-            root mancanti o corrotti, intercettazione SSL da parte di proxy
-            aziendali senza certificato trusted installato.
-        CONNECTED_DIRECT: Connessione Internet funzionante senza proxy
-            esplicito. Include il caso di proxy trasparente (rilevato tramite
-            header Via/X-Forwarded-For ma non configurato dall'utente).
-        CONNECTED_PROXY: Connessione Internet funzionante tramite proxy
-            esplicitamente configurato nelle variabili d'ambiente
-            HTTP_PROXY o HTTPS_PROXY.
-        UNKNOWN_ERROR: Stato non determinabile. Restituito quando nessuna
-            delle fasi precedenti riesce a classificare lo stato, oppure
-            quando viene superato il global_timeout. Il campo details del
-            risultato contiene informazioni sulla fase raggiunta.
+        NO_CONNECTION: No active network interface. TCP socket test fails
+            immediately. Typical causes: cable unplugged, Wi-Fi disabled,
+            malfunctioning network driver.
+        LAN_ONLY: Functional local network (socket OK) but Internet unreachable.
+            DNS resolution fails or returns only private IPs. Typical causes:
+            router off, DHCP without gateway, corporate DNS not resolving
+            public domains.
+        CAPTIVE_PORTAL: Internet access blocked by authentication portal
+            (hotel, airport, university). HTTP requests are intercepted and
+            redirected. Requires browser open for authentication.
+        CAPTIVE_PORTAL_PROXY: Variant of CAPTIVE_PORTAL where portal is only
+            reachable through a proxy. Rare scenario but present in some
+            corporate networks with double authentication layer.
+        PROXY_REQUIRED: Network requires a proxy to access Internet but it is
+            not configured (or configured but not working). Detected by
+            scanning common ports (8080, 3128, 8888).
+        PROXY_AUTH_FAILED: Proxy is configured and reachable but authentication
+            fails (HTTP 407 Proxy Authentication Required). Credentials are
+            missing, expired, or incorrect.
+        PROXY_STALE: Proxy configuration was valid before but is now outdated:
+            proxy does not respond but direct connection works. Application
+            should remove proxy configuration.
+        SSL_ERROR: All tested URLs return SSL/TLS errors. Typical causes:
+            system clock not synchronized (NTP), missing or corrupted root
+            certificates, SSL interception by corporate proxies without
+            installed trusted certificate.
+        CONNECTED_DIRECT: Functional Internet connection without explicit proxy.
+            Includes transparent proxy case (detected via Via/X-Forwarded-For
+            headers but not configured by user).
+        CONNECTED_PROXY: Functional Internet connection via explicitly configured
+            HTTP_PROXY or HTTPS_PROXY environment variables.
+        UNKNOWN_ERROR: Undetermined state. Returned when none of the previous
+            phases can classify the state, or when global_timeout is exceeded.
+            The details field of result contains information about reached phase.
     """
     NO_CONNECTION = "no_connection"
     LAN_ONLY = "lan_only"
@@ -186,38 +265,34 @@ class ConnectionStatus(Enum):
 
 @dataclass
 class ConnectionTestResult:
-    """Risultato completo del test di connettività con dati diagnostici.
+    """Complete result of the connectivity test with diagnostic data.
 
-    Prodotto da enhanced_connection_test(), contiene lo stato rilevato,
+    (EN) Produced by enhanced_connection_test(), contains the detected status,
+    a user-facing message, technical details for logging, and indications
+    on necessary actions or redirect routes.
+
+    (IT) Prodotto da enhanced_connection_test(), contiene lo stato rilevato,
     un messaggio leggibile dall'utente, dettagli tecnici per il logging
     e indicazioni su azioni necessarie o percorsi di reindirizzamento.
 
     Attributes:
-        status (ConnectionStatus): Stato della connessione rilevato. Valore
-            principale su cui l'applicazione deve basare le proprie decisioni.
-        message (str): Descrizione in linguaggio naturale dello stato, adatta
-            per essere mostrata all'utente finale. In italiano.
-        details (Dict[str, Any]): Informazioni tecniche aggiuntive per debug
-            e logging. Il contenuto varia in base allo stato: può includere
-            url_tested, headers, error, duration_ms, proxy_url, captive_url,
-            all_results (in modalità diagnostica), error_types, ecc.
-        requires_action (bool): True se è richiesta un'azione dell'utente per
-            ripristinare la connettività (es. login captive portal, inserimento
-            credenziali proxy). False se la situazione non richiede intervento.
-        suggested_route (Optional[str]): Percorso URL suggerito per
-            reindirizzare l'utente (es. '/proxy_login', '/auth/captive_portal').
-            None se nessun reindirizzamento è necessario.
-        detected_proxy_url (Optional[str]): URL del proxy rilevato o
-            configurato (con credenziali mascherate se presenti). None se
-            nessun proxy è stato identificato nel percorso di connessione.
-        captive_portal_url (Optional[str]): URL del captive portal intercettato,
-            se rilevato dalla fase di majority vote. Può essere usato per
-            aprire automaticamente il browser sulla pagina di login.
-        test_duration_ms (int): Durata totale del test in millisecondi.
-            In caso di timeout globale, corrisponde al valore di global_timeout × 1000.
+        status (ConnectionStatus): Detected connection status.
+        message (str): Natural language description of the status, suitable
+            for display to the end user (in Italian).
+        details (Dict[str, Any]): Additional technical information for debug
+            and logging.
+        requires_action (bool): True if user action is required to restore
+            connectivity.
+        suggested_route (Optional[str]): Suggested URL path to redirect user.
+        detected_proxy_url (Optional[str]): Masked proxy URL if detected.
+        captive_portal_url (Optional[str]): Captive portal URL if detected.
+        test_duration_ms (int): Total test duration in milliseconds.
 
     Examples:
-        Utilizzo base del risultato::
+    (EN) Basic usage:
+    (IT) Utilizzo base:
+
+    code::
 
             import asyncio
             from connection_checker import enhanced_connection_test, ConnectionStatus
@@ -232,7 +307,7 @@ class ConnectionTestResult:
             elif result.requires_action:
                 print(f"Azione richiesta: {result.message}")
 
-        Accesso ai dettagli tecnici::
+        Access technical details::
 
             result = asyncio.run(enhanced_connection_test(test_all_urls=True))
             for url_result in result.details.get("results_per_url", []):
@@ -257,29 +332,29 @@ class ConnectionTestResult:
 
 @dataclass
 class ConnectionTestConfig:
-    """Configurazione per l'esecuzione di enhanced_connection_test.
+    """Configuration object for running enhanced_connection_test.
 
-    Raggruppa tutti i parametri di configurazione in un unico oggetto,
+    (EN) Holds all configuration parameters in a single object, making the API
+    extensible without breaking backwards compatibility.
+
+    (IT) Raggruppa tutti i parametri di configurazione in un unico oggetto,
     rendendo l'API estensibile senza rompere la retrocompatibilità.
     Se passato a enhanced_connection_test, i valori di questo oggetto
     hanno precedenza sui parametri singoli.
 
     Attributes:
-        test_urls (Optional[List[str]]): Lista di URL HTTPS da testare.
-            Se None, viene usata la lista di default (GitHub, Google, PyPI, npm).
-            Utile per reti con proxy che bloccano alcuni siti ma ne consentono
-            altri: passare gli URL critici per l'applicazione specifica.
-        timeout (int): Timeout in secondi per ogni singola richiesta HTTP.
-            Default: 5. Valori consigliati: 3-10 secondi.
-        test_all_urls (bool): Se True, testa tutti gli URL anche dopo il primo
-            successo (modalità diagnostica). Se False (default), esce al primo
-            successo (modalità performance).
-        global_timeout (int): Timeout massimo in secondi per l'intero test.
-            Default: 60. Se superato, viene restituito ConnectionStatus.UNKNOWN_ERROR
-            con informazioni sullo stato parziale raggiunto.
+        test_urls (Optional[List[str]]): List of HTTPS URLs to test.
+        timeout (int): Timeout in seconds for each HTTP request. Default: 5.
+        test_all_urls (bool): If True, test all URLs in diagnostic mode.
+            Default: False (performance mode, early-exit).
+        global_timeout (int): Maximum timeout in seconds for entire test.
+            Default: 60.
 
     Examples:
-        Configurazione base con URL personalizzati::
+    (EN) Basic configuration with custom URLs:
+    (IT) Configurazione base con URL personalizzati:
+
+    code::
 
             config = ConnectionTestConfig(
                 test_urls=["https://mia-api.internal.com", "https://fallback.com"],
@@ -288,7 +363,7 @@ class ConnectionTestConfig:
             )
             result = await enhanced_connection_test(config=config)
 
-        Modalità diagnostica completa::
+        Full diagnostic mode::
 
             config = ConnectionTestConfig(test_all_urls=True)
             result = await enhanced_connection_test(config=config)
@@ -301,44 +376,57 @@ class ConnectionTestConfig:
 
 
 def _mask_proxy_credentials(proxy_url: str) -> str:
-    """Maschera le credenziali presenti in un proxy URL per uso sicuro nei log.
+    """Mask credentials in a proxy URL for safe logging.
 
-    Sostituisce username e password con '***' prima di qualsiasi operazione
-    di logging, impedendo la fuga accidentale di credenziali sensibili.
+    (EN) Replaces username and password with '***' before any logging
+    operation, preventing accidental leakage of sensitive data.
+
+    (IT) Sostituisce username e password con '***' prima di qualsiasi
+    operazione di logging, impedendo la fuga accidentale di credenziali sensibili.
 
     Args:
-        proxy_url (str): URL del proxy, potenzialmente con credenziali.
-            Formato atteso: ``scheme://user:password@host:port``
-            Esempio: ``http://admin:secret@proxy.company.com:3128``
+        proxy_url (str): Proxy URL, potentially with credentials.
+            Expected format: ``scheme://user:password@host:port``
 
     Returns:
-        str: URL con credenziali mascherate, es. ``http://***@proxy.company.com:3128``.
+        str:
+            (EN) URL with masked credentials or ``[invalid_proxy_url]`` on parse errors.
+            (IT) URL con credenziali mascherate, es. ``http://***@proxy.company.com:3128``.
             Se il proxy URL non contiene credenziali, viene restituito invariato.
             In caso di URL non parsabile, restituisce la stringa ``[invalid_proxy_url]``
             per segnalare il problema senza sollevare eccezioni.
 
     Raises:
-        Non solleva eccezioni: qualsiasi errore di parsing viene gestito
+        (EN) It doesn't throw exceptions: any parsing errors are handled
+        internally by returning ``[invalid_proxy_url]``.
+        (IT) Non solleva eccezioni: qualsiasi errore di parsing viene gestito
         internamente restituendo ``[invalid_proxy_url]``.
 
     Note:
-        Questa funzione è intenzionalmente fail-safe: preferisce restituire
+        (EN) This function is intentionally fail-safe: it prefers to return
+        a placeholder rather than propagate exceptions, since it is
+        invoked in logging paths where a secondary exception
+        would compromise the primary diagnostics.
+        (IT) Questa funzione è intenzionalmente fail-safe: preferisce restituire
         un placeholder piuttosto che propagare eccezioni, poiché viene
         invocata in percorsi di logging dove un'eccezione secondaria
         comprometterebbe la diagnostica principale.
 
     Examples:
-        URL con credenziali::
+    (EN) With credentials:
+    (IT) Con credenziali:
+
+    code::
 
             masked = _mask_proxy_credentials("http://user:pass@proxy.local:3128")
             # "http://***@proxy.local:3128"
 
-        URL senza credenziali::
+        Without credentials::
 
             masked = _mask_proxy_credentials("http://proxy.local:3128")
             # "http://proxy.local:3128"
 
-        URL non valido::
+        Invalid URL::
 
             masked = _mask_proxy_credentials("not_a_url")
             # "not_a_url" oppure "[invalid_proxy_url]"
@@ -354,38 +442,55 @@ def _mask_proxy_credentials(proxy_url: str) -> str:
 
 @asynccontextmanager
 async def unset_proxy_env_async():
-    """Context manager asincrono che disabilita temporaneamente le variabili proxy.
+    """Async context manager that temporarily unsets proxy-related env vars.
 
-    Rimuove le variabili d'ambiente HTTP_PROXY, HTTPS_PROXY (e le varianti
+    (EN) Removes HTTP_PROXY, HTTPS_PROXY (and lowercase variants) for the
+    scope of the ``async with`` block and restores them on exit, even on
+    exception. Thread-safe via asyncio.Lock to avoid races between coroutines.
+
+    (IT) Rimuove le variabili d'ambiente HTTP_PROXY, HTTPS_PROXY (e le varianti
     lowercase) per la durata del blocco ``async with``, poi le ripristina
     ai valori originali all'uscita, anche in caso di eccezione.
 
-    Utilizzato internamente per eseguire richieste HTTP dirette (senza proxy)
+    (EN) Used internally to execute direct HTTP requests (without proxies)
+    even when the environment has proxies configured, ensuring that tests
+    in Phases 1-2 are not affected by system proxies.
+    (IT) Utilizzato internamente per eseguire richieste HTTP dirette (senza proxy)
     anche quando l'ambiente ha proxy configurati, garantendo che i test
     delle fasi 1-2 non siano influenzati da proxy di sistema.
 
     Yields:
-        None: cede il controllo al blocco ``async with`` con le variabili
+        (EN) None: yields control to the ``async with`` block with proxy variables
+        removed from the environment.
+        (IT) None: cede il controllo al blocco ``async with`` con le variabili
         proxy rimosse dall'ambiente.
 
     Note:
-        Thread-safety: l'accesso a ``os.environ`` è protetto da ``_proxy_env_lock``
+        (EN) Thread safety: Access to os.environ is protected by asyncio.Lock, which prevents race conditions
+        in scenarios with multiple concurrent coroutines simultaneously modifying the same environment variables.
+        The lock is acquired for the entire duration of the context (removal + execution + restoration).
+        The managed variables are: HTTP_PROXY, HTTPS_PROXY, http_proxy, https_proxy.
+        The original values are preserved and restored even if the lock raises an exception.
+
+        (IT) Thread-safety: l'accesso a ``os.environ`` è protetto da ``_proxy_env_lock``
         (``asyncio.Lock``), che previene race condition in scenari con più
         coroutine concorrenti che modificano contemporaneamente le stesse
         variabili d'ambiente. Il lock viene acquisito per l'intera durata
         del contesto (rimozione + esecuzione + ripristino).
-
         Le variabili gestite sono: HTTP_PROXY, HTTPS_PROXY, http_proxy, https_proxy.
         I valori originali sono preservati e ripristinati anche se il blocco
         solleva un'eccezione.
 
     Examples:
-        Richiesta diretta ignorando il proxy di sistema::
+    (EN) Direct request bypassing system proxy:
+    (IT) Richiesta diretta ignorando il proxy di sistema:
 
-            async with unset_proxy_env_async():
-                async with aiohttp.ClientSession() as session:
-                    async with session.get("https://example.com") as resp:
-                        print(resp.status)  # Bypass proxy
+    code::
+
+        async with unset_proxy_env_async():
+            async with aiohttp.ClientSession() as session:
+                async with session.get("https://example.com") as resp:
+                    print(resp.status)  # Bypass proxy
     """
     async with _proxy_env_lock:
         old_http = os.environ.pop('HTTP_PROXY', None)
@@ -407,40 +512,57 @@ async def unset_proxy_env_async():
 
 
 async def _test_socket_connectivity() -> bool:
-    """Verifica la disponibilità di un'interfaccia di rete attiva tramite TCP.
+    """Check whether a network interface is active by opening a TCP socket.
 
-    Tenta una connessione TCP al server DNS pubblico di Google (8.8.8.8:53).
+    (EN) Attempts a TCP connection to Google's public DNS (8.8.8.8:53).
+    This is the fastest and most basic test: fails only if there is no
+    connectivity at the transport level (no active interface).
+
+    (IT) Tenta una connessione TCP al server DNS pubblico di Google (8.8.8.8:53).
     È il test più veloce e basilare: fallisce solo se non esiste alcuna
     connettività a livello di trasporto (nessuna interfaccia attiva).
 
     Returns:
-        bool: True se la connessione TCP viene stabilita con successo,
+        (EN) bool: True if TCP connection is established successfully, False otherwise.
+        (IT) bool: True se la connessione TCP viene stabilita con successo,
             indicando che almeno un'interfaccia di rete è attiva e
             raggiunge la rete. False se la connessione fallisce per
             qualsiasi motivo (timeout, network unreachable, ecc.).
 
     Note:
-        Protocollo TCP vs UDP: il test usa TCP (SOCK_STREAM) anziché UDP
+        (EN) TCP vs. UDP Protocol: The test uses TCP (SOCK_STREAM) instead of UDP
+        (SOCK_DGRAM). With UDP, socket.connect() does not actually send
+        data or check reachability—it only sets the remote
+        address locally, so it always returns success even without a
+        network. TCP, on the other hand, performs a three-way handshake, verifying
+        that the packet actually reaches its destination.
+        The timeout is intentionally short (1 second): this test is a
+        preliminary check that must complete quickly to avoid
+        slowing down the overall flow.
+
+        (IT) Protocollo TCP vs UDP: il test usa TCP (SOCK_STREAM) anziché UDP
         (SOCK_DGRAM). Con UDP, ``socket.connect()`` non invia effettivamente
         dati né verifica la raggiungibilità — imposta solo l'indirizzo
         remoto localmente, quindi restituisce sempre successo anche senza
         rete. TCP invece esegue il three-way handshake, verificando
         che il pacchetto raggiunga effettivamente la destinazione.
-
         Il timeout è volutamente breve (1 secondo): questo test è una
         verifica preliminare che deve completarsi rapidamente per non
         rallentare il flusso complessivo.
 
     Performance:
-        Tipicamente < 5ms su rete locale funzionante.
-        ~1000ms in caso di timeout (nessuna rete disponibile).
+        Typically < 5ms on functional local network.
+        ~1000ms on timeout (no network available).
 
     Examples:
-        Utilizzo diretto (normalmente invocato internamente)::
+    (EN) Direct usage (normally invoked internally):
+    (IT) Utilizzo diretto (normalmente invocato internamente):
 
-            is_connected = await _test_socket_connectivity()
-            if not is_connected:
-                print("Nessuna rete disponibile")
+    code::
+
+        is_connected = await _test_socket_connectivity()
+        if not is_connected:
+            print("No network available")
     """
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -454,23 +576,40 @@ async def _test_socket_connectivity() -> bool:
 
 
 def _is_private_or_local_ip(ip_address: str) -> bool:
-    """Determina se un indirizzo IP appartiene a un range privato, locale o riservato.
+    """Determine whether an IP is private, loopback, link-local, or reserved.
 
-    Usato per validare le risposte DNS: in reti aziendali con DNS split-horizon
-    o DNS che risponde a qualsiasi query, la risoluzione di domini pubblici può
-    restituire IP privati, falsamente indicando una connessione Internet funzionante.
+    (EN) Used to validate DNS responses: in corporate networks with split-horizon
+    DNS or DNS responding to any query, resolution of public domains may
+    return private IPs, falsely indicating functional Internet connection.
+
+    (IT) Usato per validare le risposte DNS: in reti aziendali con DNS
+    split-horizon o DNS che risponde a qualsiasi query, la risoluzione
+    di domini pubblici può restituire IP privati, falsamente indicando
+    una connessione Internet funzionante.
 
     Args:
-        ip_address (str): Indirizzo IP in formato stringa da validare.
-            Supporta IPv4 e indirizzi speciali. Stringa vuota trattata come privata.
+        ip_address (str): IP address string to validate.
 
     Returns:
-        bool: True se l'IP è in un range privato, di loopback, link-local o
+        (EN) bool: True if IP is in private, loopback, link-local or reserved range.
+            False if IP is public and routable.
+        (IT) bool: True se l'IP è in un range privato, di loopback, link-local o
             riservato — ovvero NON è un indirizzo pubblico raggiungibile su Internet.
             False se l'IP è pubblico e instradabile.
 
     Note:
-        Range considerati privati/locali:
+        (EN) Ranges considered private/local:
+
+        - Loopback (RFC 5735): 127.0.0.0/8
+        - Private (RFC 1918): 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16
+        - Link-local (RFC 3927): 169.254.0.0/16 (APIPA, assigned when DHCP is not available)
+        - Special addresses: 0.0.0.0, 255.255.255.255
+        ::1
+
+        The function does not use ipaddress.ip_address() for performance reasons:
+        String prefix comparison is faster for this use case.
+
+        (IT) Range considerati privati/locali:
 
         - **Loopback** (RFC 5735): ``127.0.0.0/8``
         - **Privati RFC 1918**: ``10.0.0.0/8``, ``172.16.0.0/12``, ``192.168.0.0/16``
@@ -482,16 +621,19 @@ def _is_private_or_local_ip(ip_address: str) -> bool:
         il confronto tramite prefisso stringa è più veloce per questo caso d'uso.
 
     Examples:
-        IP privati (restituisce True)::
+    (EN) Private IPs (returns True):
+    (IT) IP privati (restituisce True):
+
+    code::
 
             _is_private_or_local_ip("192.168.1.1")   # True — RFC 1918
             _is_private_or_local_ip("10.0.0.1")      # True — RFC 1918
             _is_private_or_local_ip("172.16.0.1")    # True — RFC 1918
             _is_private_or_local_ip("127.0.0.1")     # True — loopback
             _is_private_or_local_ip("169.254.1.1")   # True — link-local
-            _is_private_or_local_ip("")               # True — stringa vuota
+            _is_private_or_local_ip("")              # True — void string
 
-        IP pubblici (restituisce False)::
+        Public IP (return False)::
 
             _is_private_or_local_ip("8.8.8.8")       # False — Google DNS
             _is_private_or_local_ip("1.1.1.1")       # False — Cloudflare DNS
@@ -523,19 +665,39 @@ def _is_private_or_local_ip(ip_address: str) -> bool:
 
 
 async def _test_dns_resolution() -> bool:
-    """Verifica la capacità di risolvere DNS pubblici con validazione degli IP ottenuti.
+    """Verify DNS resolution of public domains and ensure returned IPs are public.
 
-    Testa la risoluzione di tre domini pubblici noti e verifica che gli indirizzi
-    IP restituiti siano effettivamente pubblici. Richiede almeno 2 risoluzioni
-    valide per considerare il DNS funzionante.
+    (EN) Tests resolution of three known public domains and checks that returned
+    IP addresses are indeed public. Requires at least 2 valid resolutions
+    to consider DNS functional.
+
+    (IT) Testa la risoluzione di tre domini pubblici noti e verifica che gli
+    indirizzi IP restituiti siano effettivamente pubblici. Richiede almeno
+    2 risoluzioni valide per considerare il DNS funzionante.
 
     Returns:
-        bool: True se almeno 2 domini su 3 si risolvono in indirizzi IP pubblici
+        (EN) bool: True if at least 2 out of 3 domains resolve to public IPs.
+            False otherwise (total failure, timeout, or only private IPs).
+        (IT) bool: True se almeno 2 domini su 3 si risolvono in indirizzi IP pubblici
             (non privati, non loopback, non link-local). False in tutti gli altri
             casi: fallimento totale, timeout, o risposte con soli IP privati.
 
     Note:
-        Soglia a 2 domini: un singolo dominio potrebbe essere temporaneamente
+        (EN) Two-domain threshold: A single domain may be temporarily
+        unavailable (maintenance, CDN outage). Two independent lookups
+        on different domains (Google, GitHub, Cloudflare) confirm that the public
+        DNS is actually reachable.
+
+        Corporate networks with split-horizon DNS: Some corporate networks configure
+        DNS servers that respond to any query with internal IPs, even for
+        public domains like google.com. Without IP validation, these
+        environments would falsely display "DNS working." Verification
+        using _is_private_or_local_ip() eliminates this false positive.
+
+        The timeout for each lookup is 2.0 seconds to balance
+        responsiveness and tolerance for slow DNS.
+
+        (IT) Soglia a 2 domini: un singolo dominio potrebbe essere temporaneamente
         non disponibile (manutenzione, outage CDN). Due risoluzioni indipendenti
         su domini diversi (Google, GitHub, Cloudflare) confermano che il DNS
         pubblico è realmente raggiungibile.
@@ -550,16 +712,19 @@ async def _test_dns_resolution() -> bool:
         reattività e tolleranza a DNS lenti.
 
     Performance:
-        - Best case (tutti e 2 i primi domini risolvono): ~50-150ms
-        - Worst case (tutti falliscono): ~6s (3 domini × 2s timeout)
-        - Caso tipico: ~100-300ms
+        - Best case: ~50-150ms
+        - Typical case: ~100-300ms
+        - Worst case: ~6s (all timeouts)
 
     Examples:
-        Utilizzo diretto (normalmente invocato internamente)::
+    (EN) Direct usage (normally invoked internally):
+    (IT) Utilizzo diretto (normalmente invocato internamente):
 
-            can_resolve = await _test_dns_resolution()
-            if not can_resolve:
-                print("DNS pubblico non raggiungibile")
+    code::
+
+        can_resolve = await _test_dns_resolution()
+        if not can_resolve:
+            print("Public DNS unreachable")
     """
     test_domains = ['www.google.com', 'github.com', 'cloudflare.com']
     successful_public_resolutions = 0
@@ -599,30 +764,57 @@ async def _test_dns_resolution() -> bool:
 
 
 async def _is_valid_success_response(status_code: int, content_type: str, response, url: str) -> bool:
-    """Valida se una risposta HTTP indica connettività effettiva verso l'URL richiesto.
+    """Validate if an HTTP response indicates real connectivity to the requested URL.
 
-    Applica due criteri in sequenza: verifica del codice di stato HTTP e
-    corrispondenza del dominio tra URL richiesto e URL finale della risposta.
-    La logica è intenzionalmente semplice per evitare falsi negativi su siti
-    legittimi con comportamenti HTTP complessi.
+    (EN) Applies two criteria in sequence: HTTP status code verification and
+    match between requested domain and final response domain. Logic is
+    intentionally simple to avoid false negatives on legitimate sites.
 
+    (IT) Applica due criteri in sequenza: verifica del codice di stato HTTP
+    e corrispondenza tra dominio richiesto e dominio finale della risposta.
+    La logica è intenzionalmente semplice per evitare falsi negativi su siti legittimi.
+
+    Criteria:
+        - HTTP status is 2xx (204 always valid).
+        - Final response domain matches requested domain.
     Args:
-        status_code (int): Codice di stato HTTP della risposta.
-        content_type (str): Valore dell'header Content-Type (non usato
-            nella logica attuale, mantenuto per estensibilità futura).
-        response: Oggetto risposta aiohttp. Usato per leggere ``response.url``
-            (URL finale dopo eventuali redirect).
-        url (str): URL originale richiesto, usato per il confronto di dominio.
+        status_code (int): HTTP status code of the response.
+        content_type (str): Value of the Content-Type header (not used
+            in the current logic, retained for future extensibility).
+            response: Aiohttp response object. Used to read ``response.url``
+            (final URL after any redirects).
+        url (str): Original URL requested, used for domain comparison.
 
     Returns:
-        bool: True se la risposta soddisfa entrambi i criteri:
+        (EN) bool: True if both criteria are satisfied, False otherwise.
+        (IT) bool: True se la risposta soddisfa entrambi i criteri:
             1. Il codice di stato è nel range 2xx (200-299).
             2. Il dominio dell'URL finale corrisponde al dominio richiesto
                (nessun redirect cross-domain).
             False se uno dei criteri non è soddisfatto.
 
     Note:
-        Logica semplificata — solo status code e domain match: versioni
+        (EN) Simplified logic — status code and domain match only: Previous versions
+        included heuristics on HTML content, login forms,
+        redirect patterns, and X-Captive-Portal headers. These
+        checks caused false negatives on legitimate sites (GitHub, Google, PyPI)
+        that use analytics JavaScript or CDNs with internal redirects.
+        Captive portal detection is delegated entirely to
+        phase 5 via dedicated endpoints (connectivitycheck.gstatic.com, etc.)
+        that respond predictably and unambiguously.
+
+        Status 204 — No Content: Always valid, used by
+        connectivity check endpoints (e.g., Google generate_204).
+
+        Domain mismatch: If the final URL has a domain different from the
+        requested one, it indicates a cross-domain redirect (typical of captive portals
+        or transparent proxies that intercept traffic). In this case,
+        the response is considered invalid for connectivity to the original site.
+
+        Fail-open on parsing errors: If the domain cannot be extracted
+        from the URL (a rare case), the response is considered valid for robustness.
+
+        (IT) Logica semplificata — solo status code e domain match: versioni
         precedenti includevano euristiche su contenuto HTML, form di login,
         pattern di redirect e header X-Captive-Portal. Questi controlli
         causavano falsi negativi su siti legittimi (GitHub, Google, PyPI)
@@ -643,25 +835,26 @@ async def _is_valid_success_response(status_code: int, content_type: str, respon
         dall'URL (caso raro), la risposta è considerata valida per robustezza.
 
     Examples:
-        Risposta valida::
+    (EN) Valid response:
+    (IT) Risposta valida:
 
-            # status 200, stesso dominio
+            # status 200 same domain
             is_valid = await _is_valid_success_response(
                 200, "text/html", response, "https://github.com"
             )  # True
 
         Captive portal (redirect cross-domain)::
 
-            # status 200 ma dominio finale è captive.hotel.com
+            # status 200 but domain is captive.hotel.com
             is_valid = await _is_valid_success_response(
                 200, "text/html", response, "https://www.google.com"
             )  # False — domain mismatch
 
-        Codice di stato non valido::
+        Invalid status code::
 
             is_valid = await _is_valid_success_response(
                 301, "text/html", response, "https://example.com"
-            )  # False — non è 2xx
+            )  # False — not 2xx
     """
     if not (200 <= status_code < 300):
         logger.debug(f"Invalid status code: {status_code}")
@@ -691,45 +884,29 @@ async def _test_http_direct(
         timeout: int = 5,
         test_all_urls: bool = False
 ) -> Dict[str, any]:
-    """Testa la connettività HTTP diretta verso gli URL forniti, senza proxy.
+    """Test direct HTTPS access to a list of URLs without using any proxy.
 
-    Supporta due modalità operative selezionabili tramite ``test_all_urls``:
+    (EN) Supports two modes: PERFORMANCE (default, early-exit on first success)
+    and DIAGNOSTIC (test all URLs, return detailed per-URL results).
 
-    - **Modalità PERFORMANCE** (``test_all_urls=False``, default): itera gli URL
-      in ordine e ritorna al primo successo. Ottimale per uso in produzione
-      dove interessa solo sapere se la connessione funziona.
-
-    - **Modalità DIAGNOSTIC** (``test_all_urls=True``): testa tutti gli URL
-      indipendentemente dal risultato e restituisce un report dettagliato per
-      URL. Utile per diagnosticare quali URL sono raggiungibili in una rete
-      con accesso selettivo (es. proxy che blocca solo alcuni domini).
+    (IT) Supporta due modalità: PERFORMANCE (default, early-exit al primo
+    successo) e DIAGNOSTIC (test di tutti gli URL, risultati dettagliati per URL).
 
     Args:
-        test_urls (List[str]): Lista di URL HTTPS da testare in ordine.
-            Ogni URL deve iniziare con ``https://``. La verifica SSL è sempre
-            abilitata; URL HTTP verranno probabilmente reindirizzati o falliti.
-        timeout (int): Timeout in secondi per ogni singola richiesta HTTP.
-            Default: 5. Applicato tramite ``aiohttp.ClientTimeout(total=timeout)``.
-        test_all_urls (bool): Se True attiva la modalità DIAGNOSTIC (testa tutti
-            gli URL). Se False (default) attiva la modalità PERFORMANCE
-            (early-exit al primo successo).
+        test_urls (List[str]): List of HTTPS URLs to test in order.
+        timeout (int): Timeout in seconds for each HTTP request. Default: 5.
+        test_all_urls (bool): If True, test all URLs in diagnostic mode.
+            Default: False (performance mode, early-exit).
 
     Returns:
-        Dict[str, Any]: Dizionario con i risultati del test. I campi variano
-        leggermente tra le due modalità:
-
-        Campi comuni (entrambe le modalità):
-            - **success** (bool): True se almeno un URL ha risposto con successo.
-            - **status_code** (Optional[int]): Codice HTTP dell'URL che ha avuto
-              successo; None se nessun URL ha avuto successo.
-            - **error** (Optional[str]): Messaggio di errore aggregato se tutti
-              gli URL sono falliti; None in caso di successo.
-            - **detected_proxy_via_headers** (bool): True se almeno una risposta
-              conteneva header indicativi di proxy trasparente (Via, X-Forwarded-For,
-              X-Cache, X-Proxy-ID).
-            - **error_types** (Dict[str, int]): Conteggio errori per tipo:
-              ``ssl`` (errori certificato), ``timeout`` (scaduti),
-              ``connection`` (altri errori di rete).
+        Dict[str, Any]: Dictionary with test results. Fields vary by mode:
+            - success (bool): At least one URL responded successfully.
+            - status_code (Optional[int]): HTTP code of successful URL.
+            - error (Optional[str]): Error message if all URLs failed.
+            - detected_proxy_via_headers (bool): Transparent proxy detected.
+            - error_types (Dict[str, int]): Count of errors by type.
+            - url_tested (Optional[str]): Successful URL (PERFORMANCE mode only).
+            - all_results (List[Dict]): Results per URL (DIAGNOSTIC mode only).
 
         Solo modalità PERFORMANCE (``test_all_urls=False``):
             - **url_tested** (Optional[str]): URL che ha avuto successo.
@@ -746,9 +923,27 @@ async def _test_http_direct(
             - **urls_tested** (int): Numero totale di URL testati.
             - **urls_successful** (int): Numero di URL con risposta valida.
             - **urls_failed** (int): Numero di URL falliti.
+Examples:
+    (EN) Direct usage (normally invoked internally):
+    (IT) Utilizzo diretto (normalmente invocato internamente):
+
+    code::
+        result = await _test_http_direct(["https://github.com"])
+        if result['success']:
+            print(f"Online via {result['url_tested']}")
 
     Note:
-        Modalità early-exit vs diagnostica: in modalità PERFORMANCE la funzione
+        (EN) Early-exit vs. diagnostic mode: In PERFORMANCE mode, the
+        function returns as soon as it finds a reachable URL, ignoring the remaining ones.
+        This is fine for the main use case (knowing if you're online),
+        but it doesn't provide visibility into partially blocked URLs. Use DIAGNOSTIC mode
+        by passing "test_all_urls=True" to get the full picture.
+
+        Transparent proxy detection: The Via, X-Forwarded-For, X-Cache
+        and X-Proxy-ID headers are checked to detect transparent proxies
+        not configured by the user. Their presence does not invalidate the result.
+
+        (IT) Modalità early-exit vs diagnostica: in modalità PERFORMANCE la funzione
         ritorna non appena trova un URL raggiungibile, ignorando i restanti.
         Questo è corretto per il caso d'uso principale (sapere se si è online),
         ma non fornisce visibilità su URL parzialmente bloccati. Usare la modalità
@@ -759,6 +954,15 @@ async def _test_http_direct(
         configurati dall'utente. La loro presenza non invalida il risultato.
 
     Security:
+        (EN)
+        - Requests always use HTTPS with SSL verification enabled (ssl=True).
+        - SSL errors are tracked separately in error_types['ssl']:
+        If all URLs fail with SSL errors, enhanced_connection_test
+        may return ConnectionStatus.SSL_ERROR instead of UNKNOWN_ERROR.
+        - System proxy variables are temporarily removed via
+        unset_proxy_env_async() to ensure a real-world test.
+        - No credentials are logged.
+        (IT)
         - Le richieste usano sempre HTTPS con verifica SSL abilitata (``ssl=True``).
         - Gli errori SSL sono tracciati separatamente in ``error_types['ssl']``:
           se tutti gli URL falliscono con errori SSL, enhanced_connection_test
@@ -952,54 +1156,55 @@ async def _test_http_via_proxy(
         timeout: int = 5,
         test_all_urls: bool = False
 ) -> Dict[str, any]:
-    """Testa la connettività HTTP attraverso un proxy esplicito.
+    """Test HTTPS access to URLs routing requests through an explicit proxy URL.
 
-    Funziona come _test_http_direct() ma instrada tutte le richieste attraverso
-    il proxy specificato. Supporta le stesse due modalità operative (PERFORMANCE
-    e DIAGNOSTIC) con la stessa struttura di risposta.
+    (EN) Behaves similarly to _test_http_direct but routes all requests through
+    the specified proxy. Supports same two modes (PERFORMANCE and DIAGNOSTIC)
+    with same return structure. Handles 407 (Proxy Authentication Required)
+    as special case in performance mode.
 
-    Utilizzata in tre contesti distinti:
-    1. Test del proxy configurato nelle variabili d'ambiente (Fase 3).
-    2. Test del proxy rilevato tramite scansione porte (Fase 4).
-    3. Re-test dopo fallimento del proxy configurato (Fase 3, stale proxy check).
+    (IT) Funziona come _test_http_direct() ma instrada tutte le richieste
+    attraverso il proxy specificato. Supporta le stesse due modalità operative
+    (PERFORMANCE e DIAGNOSTIC) con la stessa struttura di risposta.
 
     Args:
-        test_urls (List[str]): Lista di URL HTTPS da testare tramite il proxy.
-        proxy_url (str): URL completo del proxy, incluse eventuali credenziali.
-            Formato: ``http://[user:password@]host:port``
-            Esempi:
-            - ``http://proxy.company.com:3128``
-            - ``http://admin:secret@proxy.company.com:3128``
-            Le credenziali vengono mascherate prima di qualsiasi operazione
-            di logging tramite _mask_proxy_credentials().
-        timeout (int): Timeout in secondi per ogni singola richiesta.
-            Default: 5.
-        test_all_urls (bool): Se True modalità DIAGNOSTIC (testa tutti gli URL).
-            Se False (default) modalità PERFORMANCE (early-exit al primo successo).
+        test_urls (List[str]): List of HTTPS URLs to test via proxy.
+        proxy_url (str): Complete proxy URL, potentially with credentials.
+            Format: ``http://[user:password@]host:port``
+        timeout (int): Timeout in seconds for each request. Default: 5.
+        test_all_urls (bool): If True, test all URLs in diagnostic mode.
+            Default: False (performance mode, early-exit).
 
     Returns:
-        Dict[str, Any]: Stessa struttura di _test_http_direct(). Campi comuni:
+        Dict[str, Any]: Same structure as _test_http_direct().
+            Special case: status_code=407 indicates proxy authentication failed.
 
-            - **success** (bool): True se almeno un URL ha risposto con successo.
-            - **status_code** (Optional[int]): HTTP status dell'URL riuscito; None
-              se tutti falliti. In caso di 407, contiene 407 anche se success=False.
-            - **url_tested** (Optional[str]): URL riuscito (solo modalità PERFORMANCE).
-            - **headers** (Optional[Dict]): Headers HTTP (solo modalità PERFORMANCE
-              in caso di successo).
-            - **content_type** (Optional[str]): Content-Type (solo modalità PERFORMANCE
-              in caso di successo).
-            - **error** (Optional[str]): Messaggio di errore se tutti falliti.
-            - **detected_proxy_via_headers** (bool): Sempre True (proxy esplicitamente
-              usato), eccetto nel return di fallimento totale dove è False.
-            - **all_results** (List[Dict]): Solo modalità DIAGNOSTIC. Ogni elemento
-              contiene: ``url``, ``success``, ``status_code``, ``content_type``,
-              ``error``.
-            - **urls_tested** (int): Solo modalità DIAGNOSTIC.
-            - **urls_successful** (int): Solo modalità DIAGNOSTIC.
-            - **urls_failed** (int): Solo modalità DIAGNOSTIC.
+    Examples:
+    (EN) Direct usage (normally invoked internally):
+    (IT) Utilizzo diretto (normalmente invocato internamente):
+
+    code::
+        result = await _test_http_via_proxy(
+            ["https://github.com"],
+            "http://proxy.company.com:3128"
+        )
+        if result['status_code'] == 407:
+            print("Proxy authentication required")
 
     Note:
-        Gestione 407 Proxy Authentication Required: in modalità PERFORMANCE, se
+        (EN) 407 Handling Proxy Authentication Required: In PERFORMANCE mode, if
+        the proxy responds with an HTTP 407, the function immediately returns
+        ``success=False`` and ``status_code=407`` without continuing with the other URLs.
+        This signal is intercepted by enhanced_connection_test to
+        return ConnectionStatus.PROXY_AUTH_FAILED. In DIAGNOSTIC mode,
+        the 407 is logged in the URL results but does not break the loop.
+
+        Credential masking: The proxy_url is masked via
+        _mask_proxy_credentials() before any logging. The original proxy_url
+        (with any credentials) is passed directly to aiohttp, which
+        handles authentication internally without exposing it in the logs.
+
+        (IT) Gestione 407 Proxy Authentication Required: in modalità PERFORMANCE, se
         il proxy risponde con HTTP 407, la funzione ritorna immediatamente con
         ``success=False`` e ``status_code=407`` senza continuare con gli altri URL.
         Questo segnale viene intercettato da enhanced_connection_test per
@@ -1012,6 +1217,11 @@ async def _test_http_via_proxy(
         gestisce l'autenticazione internamente senza esporlo nei log.
 
     Security:
+        (EN)
+        - Credentials in the URL proxy are always masked in the logs.
+        - SSL is enabled (ssl=True), even through the proxy.
+        - No credentials are logged or included in the return dictionary.
+        (IT)
         - Credenziali nel proxy URL sempre mascherate nei log.
         - SSL abilitato (``ssl=True``) anche attraverso il proxy.
         - Nessuna credenziale viene loggata o inclusa nel dizionario di ritorno.
@@ -1193,51 +1403,63 @@ async def _test_http_via_proxy(
 
 
 async def _test_captive_portal(timeout: int = 5) -> Dict[str, any]:
-    """Rileva la presenza di un captive portal tramite majority vote su endpoint dedicati.
+    """Detect captive portals by querying three dedicated HTTP endpoints with majority vote.
 
-    Interroga tre endpoint HTTP di verifica connettività forniti da vendor affidabili
-    (Google, Microsoft, Firefox). Confronta la risposta ricevuta con quella attesa:
-    una risposta anomala (status diverso o body errato) indica che il traffico HTTP
-    è stato intercettato e alterato da un captive portal.
+    (EN) Queries three connectivity check endpoints (Google, Microsoft, Firefox)
+    and applies majority vote (≥50% of conclusive tests) to determine captive
+    portal presence. Uses HTTP endpoints (not HTTPS) so responses can be
+    intercepted by captive portals.
 
-    Endpoint testati:
-        - **Google** ``http://connectivitycheck.gstatic.com/generate_204``:
-          risposta attesa HTTP 204 No Content, corpo vuoto.
-        - **Microsoft** ``http://www.msftconnecttest.com/connecttest.txt``:
-          risposta attesa HTTP 200, corpo contiene ``"Microsoft Connect Test"``.
-        - **Firefox** ``http://detectportal.firefox.com/success.txt``:
-          risposta attesa HTTP 200, corpo contiene ``"success"``.
-
-    Args:
-        timeout (int): Timeout in secondi per ogni singola richiesta HTTP.
-            Default: 5. Applicato individualmente a ciascuno dei 3 endpoint.
+    (IT) Interroga tre endpoint HTTP di verifica connettività forniti da vendor
+    affidabili (Google, Microsoft, Firefox) e usa il voto di maggioranza
+    (≥50% dei test conclusivi) per determinare la presenza di un captive portal.
 
     Returns:
-        Dict[str, Any]: Dizionario con i risultati della rilevazione:
+        Dict[str, Any]: Dictionary containing:
+            - is_captive (bool): Captive portal detected (True/False).
+            - captive_url (Optional[str]): Intercepted portal URL if detected.
+            - portal_type (Optional[str]): Vendor type (google/microsoft/firefox).
+            - response_status (Optional[int]): HTTP status from detecting endpoint.
+            - test_results (List[Dict]): Per-endpoint test results.
 
-            - **is_captive** (bool): True se il majority vote conferma la presenza
-              di un captive portal; False in caso contrario o se tutti i test
-              sono inconcludenti.
-            - **captive_url** (Optional[str]): URL finale della risposta del primo
-              endpoint che ha rilevato il captive portal (può essere diverso
-              dall'URL richiesto, es. ``http://192.168.1.1/login``). None se
-              nessun captive portal rilevato.
-            - **portal_type** (Optional[str]): Tipo di vendor che ha rilevato il
-              captive portal: ``"google"``, ``"microsoft"`` o ``"firefox"``.
-              None se nessun captive portal rilevato.
-            - **response_status** (Optional[int]): Codice HTTP ricevuto dall'endpoint
-              che ha rilevato il captive portal. None se non rilevato.
-            - **response_body** (Optional[str]): Sempre None (riservato per
-              estensioni future; il corpo non viene incluso nel risultato).
-            - **test_results** (List[Dict]): Lista con un elemento per ciascuno
-              dei 3 endpoint testati. Ogni elemento contiene:
-              ``endpoint`` (str: google/microsoft/firefox),
-              ``is_captive`` (Optional[bool]: True=captive, False=ok, None=inconcludente),
-              ``url`` (str: URL finale della risposta),
-              ``status`` (Optional[int]: codice HTTP ricevuto),
-              ``error`` (Optional[str]: messaggio di errore se timeout/eccezione).
+    Examples:
+    (EN) Direct usage (normally invoked internally):
+    (IT) Utilizzo diretto (normalmente invocato internamente):
 
+    code::
+        result = await _test_captive_portal(timeout=5)
+        if result['is_captive']:
+            print(f"Captive portal at {result['captive_url']}")
     Note:
+        (EN)
+        Majority vote mechanism: The function counts tests with a conclusive result
+        (``is_captive`` not None) and considers the captive portal confirmed if
+        at least 50% of them indicate interception. For example: if 2 out of 3 endpoints
+        detect the captive portal, the result is True (2/3 ≥ 50%). If only one
+        out of 2 conclusive endpoints detects the portal, the result is True (1/2
+        = 50%). This balances sensitivity and specificity.
+
+        Single-endpoint false positives: A single endpoint could be
+        temporarily unreachable (CDN maintenance, corporate firewall
+        blocking a single vendor), returning an error that could be
+        interpreted as a captive portal. A majority vote across 3 different vendors
+        drastically reduces this possibility: if 2 out of 3 vendors confirm
+        the interception, it is almost certainly a real captive portal.
+
+        Inconclusive result: If all three tests fail due to timeout or network error (all are "is_captive=None"), the function cannot
+        determine the state and returns "is_captive=False" for fail-safe,
+        allowing enhanced_connection_test to continue to fallback.
+
+        How interception works: Captive portals operate at the
+        network gateway level. When an unauthenticated client sends an HTTP request
+        (not HTTPS, so it can be intercepted in the clear), the gateway redirects
+        the response to its own login page instead of forwarding it to the original
+        server. Test endpoints deliberately use HTTP to be interceptable. HTTPS requests cannot be intercepted this
+        way (the certificate would not match), so these tests use
+        "ssl=False" and "allow_redirects=False" to detect interception
+        directly from the status code and response body.
+
+        (IT)
         Meccanismo majority vote: la funzione conta i test con esito conclusivo
         (``is_captive`` non None) e considera il captive portal confermato se
         almeno il 50% di essi indica intercettazione. Ad esempio: se 2 endpoint
@@ -1356,7 +1578,7 @@ async def _test_captive_portal(timeout: int = 5) -> Dict[str, any]:
                     'error': str(e)
                 })
 
-    # Majority vote: captive portal confermato se ≥50% dei test conclusivi lo indicano
+    # Majority vote: captive portal confirmed if ≥50% of conclusive tests indicate it
     captive_votes = sum(1 for r in test_results if r.get('is_captive') is True)
     total_conclusive = sum(1 for r in test_results if r.get('is_captive') is not None)
 
@@ -1404,20 +1626,58 @@ async def _test_captive_portal(timeout: int = 5) -> Dict[str, any]:
 
 
 async def _scan_common_proxy_ports() -> Optional[str]:
-    """Cerca un proxy locale sulle porte comuni e ne valida il funzionamento.
+    """Scan localhost common proxy ports (8080, 3128, 8888) and validate any open port.
 
-    Scansiona sequenzialmente le porte 8080, 3128 e 8888 su localhost. Per ogni
-    porta aperta, esegue una richiesta HTTP reale attraverso di essa per verificare
+    (EN) Scans common proxy ports sequentially on localhost. For each open port,
+    issues a real HTTP request through it to verify it's a working proxy
+    (not another service like a dev server).
+
+    (IT) Scansiona sequenzialmente le porte comuni su localhost. Per ogni porta
+    aperta, esegue una richiesta HTTP reale attraverso di essa per verificare
     che sia effettivamente un proxy funzionante e non un altro servizio.
 
     Returns:
-        Optional[str]: URL del proxy nel formato ``http://localhost:<porta>`` se
+        (EN) Optional[str]: Proxy URL in format ``http://localhost:<port>`` if a
+            working local proxy is found. None otherwise.
+        (IT) Optional[str]: URL del proxy nel formato ``http://localhost:<porta>`` se
             almeno una porta risulta aperta E la validazione HTTP ha successo.
             None se nessun proxy viene trovato o tutte le porte sono chiuse/non
             sono proxy.
 
     Note:
-        Performance: la scansione di tutte e 3 le porte richiede al massimo
+
+        (EN) Performance: Scanning all 3 ports takes a maximum of
+        ~1.5 seconds (3 ports × 0.5s TCP timeout each), plus
+        a maximum of 2 seconds for HTTP validation of the first open port.
+        The total worst-case time is therefore ~3.5 seconds. In the typical case
+        (no proxy) it is ~1.5 seconds.
+
+        Validation with a real HTTP request: Detecting an open port is not
+        sufficient to conclude that it is a proxy. Many services
+        use the same ports for different purposes (e.g., development server on 8080,
+        Squid on 3128, Jupyter on 8888). An open port that is not a proxy
+        would return a ``ClientProxyConnectionError`` when used as a
+        proxy, which is silently ignored and the scan continues.
+
+        Heuristics — development server on 8080: This is the most common
+        false positive case. A Node.js, Django, or Flask server in development mode
+        responds on 8080 but is not a proxy. HTTP validation correctly distinguishes
+        these cases: aiohttp attempts to use the port as a proxy
+        CONNECT/HTTP, and a normal application server will return a proxy connection error
+        , not a valid response.
+
+        Behavior if the detected proxy fails validation: If a port
+        is open but the HTTP request via proxy fails (non-proxy service, proxy
+        unreachable, etc.), the function continues with the next port.
+        If no port passes validation, it returns None and the caller
+        (enhanced_connection_test) continues to phase 5 (captive portal).
+
+        Scan localhost only: The search is limited to the local host because
+        automatically configurable proxies (WPAD) are managed separately
+        via environment variables. This function covers the case of local
+        proxies installed but not configured in the system environment variables.
+
+        (IT) Performance: la scansione di tutte e 3 le porte richiede al massimo
         ~1.5 secondi (3 porte × 0.5s timeout TCP ciascuna), a cui si aggiunge
         al massimo 2 secondi per la validazione HTTP della prima porta aperta.
         Il tempo totale nel caso peggiore è quindi ~3.5 secondi. Nel caso tipico
@@ -1447,6 +1707,15 @@ async def _scan_common_proxy_ports() -> Optional[str]:
         i proxy automaticamente configurabili (WPAD) sono gestiti separatamente
         tramite variabili d'ambiente. Questa funzione copre il caso di proxy
         locali installati ma non configurati nelle variabili d'ambiente del sistema.
+
+    Examples:
+    (EN) Direct usage (normally invoked internally):
+    (IT) Utilizzo diretto (normalmente invocato internamente):
+
+    code::
+        proxy_url = await _scan_common_proxy_ports()
+        if proxy_url:
+            print(f"Unconfigured proxy found at {proxy_url}")
     """
     common_ports = [8080, 3128, 8888]
 
@@ -1476,8 +1745,8 @@ async def _scan_common_proxy_ports() -> Optional[str]:
             proxy_url = f"http://localhost:{port}"
             logger.debug(f"Port {port} open, validating as proxy...")
 
-            # Valida la porta con una richiesta HTTP reale: una porta aperta non
-            # è necessariamente un proxy (es. server di sviluppo su 8080).
+            # Validate the port with a real HTTP request: an open port is not
+            # necessarily a proxy (e.g. development server on 8080).
             try:
                 timeout_obj = aiohttp.ClientTimeout(total=2)
                 async with aiohttp.ClientSession(timeout=timeout_obj) as session:
@@ -1504,63 +1773,35 @@ async def enhanced_connection_test(
         test_all_urls: bool = False,
         global_timeout: int = 60
 ) -> ConnectionTestResult:
-    """Test completo e multi-fase della connettività di rete.
+    """Full multi-phase connectivity test with early-exit on conclusive results.
 
-    Esegue un'analisi sequenziale dello stato della connessione articolata in
-    5 fasi con early-exit al primo risultato conclusivo. Ogni fase approfondisce
-    un livello diverso dello stack di rete, permettendo di discriminare con
-    precisione tra scenari come assenza di rete, solo LAN, captive portal,
-    proxy obbligatorio, errori SSL e connessione funzionante.
+    (EN) Executes a 6-phase sequential analysis of connection status:
+    Phase 0 (pre-check proxy vars), Phase 1 (socket), Phase 2 (DNS),
+    Phase 3 (direct HTTP), Phase 4 (proxy test), Phase 5 (captive portal).
+    Returns detailed status classification and suggested actions.
 
-    Fasi di test:
-        0. **Pre-check proxy** (preparatoria): legge le variabili d'ambiente
-           HTTP_PROXY/HTTPS_PROXY senza eseguire richieste. Nessun esito.
-        1. **Socket TCP** (livello fisico/trasporto): verifica che almeno
-           un'interfaccia di rete sia attiva tentando una connessione TCP a
-           8.8.8.8:53. Fallimento → ``NO_CONNECTION``.
-        2. **DNS** (livello rete): risolve 3 domini pubblici e verifica che
-           gli IP restituiti siano pubblici (non risposte DNS private). Richiede
-           ≥2 risoluzioni valide. Fallimento → ``LAN_ONLY``.
-        3. **HTTP diretto** (livello applicativo): testa gli URL configurati
-           senza proxy. Controlla status 2xx e corrispondenza del dominio finale.
-           Successo → ``CONNECTED_DIRECT``. Tutti SSL → ``SSL_ERROR``.
-        4. **Proxy** (rilevamento e test): se le variabili d'ambiente
-           HTTP_PROXY/HTTPS_PROXY sono configurate, le testa. In assenza di
-           configurazione, scansiona le porte locali 8080/3128/8888 cercando
-           un proxy funzionante. Esito → ``CONNECTED_PROXY``, ``PROXY_AUTH_FAILED``
-           (anche da proxy rilevato via scan), ``PROXY_STALE`` o ``PROXY_REQUIRED``.
-        5. **Captive portal** (majority vote): interroga 3 endpoint dedicati
-           (Google, Microsoft, Firefox) e usa il voto di maggioranza (≥50% dei
-           test conclusivi) per confermare la presenza di un portale. Esito →
-           ``CAPTIVE_PORTAL`` o fallback ``UNKNOWN_ERROR``.
+    (IT) Esegue un'analisi sequenziale dello stato della connessione articolata
+    in 6 fasi con early-exit al primo risultato conclusivo. Ogni fase approfondisce
+    un livello diverso dello stack di rete, permettendo di discriminare tra
+    scenari come assenza di rete, solo LAN, captive portal, proxy obbligatorio,
+    errori SSL e connessione funzionante.
 
     Args:
-        config (Optional[ConnectionTestConfig]): Oggetto di configurazione che
-            raggruppa tutti i parametri. Se fornito, i suoi valori hanno
-            precedenza sui parametri singoli corrispondenti. Permette un'API
-            più pulita e facilita la creazione di configurazioni riutilizzabili.
-            Default: None (usa i parametri singoli).
-        test_urls (Optional[List[str]]): Lista di URL HTTPS da testare nelle
-            fasi 3 e 4. Se None, usa la lista di default:
-            GitHub, api.GitHub, Google, PyPI, npm registry. Se fornito,
-            sostituisce completamente la lista di default. Utile per reti con
-            proxy che consentono l'accesso solo ad alcuni domini: passare
-            gli URL critici per la propria applicazione.
-            Default: None (lista di default).
-        timeout (int): Timeout in secondi per ogni singola richiesta HTTP nelle
-            fasi 3 e 4. Non si applica al test socket (fisso 1s) né al DNS
-            (fisso 2s per dominio). Default: 5.
-        test_all_urls (bool): Se True, testa tutti gli URL della lista anche
-            dopo il primo successo (modalità diagnostica). Il risultato include
-            il dettaglio per ogni URL in ``details['results_per_url']``. Se
-            False (default), esce al primo successo (modalità performance).
-        global_timeout (int): Timeout massimo in secondi per l'intera funzione.
-            Se superato, viene restituito ``UNKNOWN_ERROR`` con le informazioni
-            sullo stato parziale raggiunto (fase completata, ultimo risultato
-            disponibile). Default: 60.
+        config (Optional[ConnectionTestConfig]): Configuration object combining
+            all parameters. Overrides individual parameters if provided.
+        test_urls (Optional[List[str]]): List of HTTPS URLs to test. If None,
+            uses default list (GitHub, Google, PyPI, npm).
+        timeout (int): Timeout in seconds for each HTTP request. Default: 5.
+        test_all_urls (bool): If True, test all URLs in diagnostic mode.
+            Default: False (performance mode, early-exit).
+        global_timeout (int): Maximum timeout in seconds for entire test.
+            Default: 60.
 
     Returns:
-        ConnectionTestResult: Risultato completo con i seguenti campi rilevanti:
+        (EN) ConnectionTestResult: Connection status with message, technical details,
+            action flags, and suggested redirect routes.
+
+        (IT) ConnectionTestResult: Risultato completo con i seguenti campi rilevanti:
 
             - ``status``: uno dei valori di ``ConnectionStatus``.
             - ``message``: descrizione in italiano per l'utente finale.
@@ -1574,13 +1815,31 @@ async def enhanced_connection_test(
             - ``test_duration_ms``: durata totale in millisecondi.
 
     Raises:
-        Non solleva eccezioni verso il chiamante. ``asyncio.TimeoutError`` derivante
+        (EN) It does not raise an exception to the caller. ``asyncio.TimeoutError`` resulting
+        from exceeding the ``global_timeout`` is handled internally: the function
+        returns a ``ConnectionTestResult`` with ``status=UNKNOWN_ERROR`` and
+        ``details['timeout']=True`` instead of throwing the exception.
+        (IT) Non solleva eccezioni verso il chiamante. ``asyncio.TimeoutError`` derivante
         dal superamento di ``global_timeout`` viene gestito internamente: la funzione
         restituisce un ``ConnectionTestResult`` con ``status=UNKNOWN_ERROR`` e
         ``details['timeout']=True`` invece di propagare l'eccezione.
 
     Note:
-        Retrocompatibilità: i parametri singoli (``test_urls``, ``timeout``,
+        (EN) Backward Compatibility: The individual parameters (``test_urls``, ``timeout``,
+        ``test_all_urls``, ``global_timeout``) are retained for compatibility
+        with existing code that calls the function without ``config``. The
+        ``config`` parameter, when provided, overrides the individual parameters: non-None values ​​in
+        ``config.test_urls`` replace ``test_urls``; the other config fields
+        (``timeout``, ``test_all_urls``, ``global_timeout``) always replace
+        the corresponding individual parameters.
+
+        Partial State Tracking: In the event of a global timeout, the function returns
+        the best available result based on the last completed phase.
+        The ``details['phase_reached']`` field indicates which phase (0–5)
+        the test reached before timing out. A value of 0 indicates that the timeout
+        triggered during Phase 0 (pre-check) or Phase 1 (socket).
+
+        (IT) Retrocompatibilità: i parametri singoli (``test_urls``, ``timeout``,
         ``test_all_urls``, ``global_timeout``) sono mantenuti per compatibilità
         con codice esistente che chiama la funzione senza ``config``. Il parametro
         ``config``, quando fornito, sovrascrive i singoli: i valori non-None di
@@ -1594,15 +1853,15 @@ async def enhanced_connection_test(
         il test è arrivato prima del timeout. Il valore 0 indica che il timeout
         è scattato durante la Phase 0 (pre-check) o la Phase 1 (socket).
 
-    Performance:
-        - **Best case** (connessione diretta, early-exit): ~100-300ms
-        - **Caso tipico** (proxy configurato): ~3-8s
-        - **Worst case** (tutte le fasi, test_all_urls=True, tutto fallisce):
-          ~60s (capped da global_timeout)
-        - **Timeout globale**: garantisce che la funzione ritorni sempre entro
-          ``global_timeout`` secondi, anche in caso di rete molto lenta.
-
     Security:
+        (EN)
+        - No credentials are logged: proxy URLs are always masked
+            using "_mask_proxy_credentials()" before logging.
+        - Certificate verification enabled on all HTTPS requests.
+        - SSL errors detected and reported with a dedicated status ("SSL_ERROR").
+        - System proxy variables managed with asynchronous locking to prevent
+        race conditions in concurrent environments.
+        (IT)
         - Nessuna credenziale viene loggata: proxy URL sempre mascherati
           tramite ``_mask_proxy_credentials()`` prima del logging.
         - Certificate verification abilitata su tutte le richieste HTTPS.
@@ -1611,42 +1870,45 @@ async def enhanced_connection_test(
           race condition in ambienti concorrenti.
 
     Examples:
-        Utilizzo base::
+    (EN) Basic usage:
+    (IT) Utilizzo base:
 
-            import asyncio
-            from connection_checker import enhanced_connection_test, ConnectionStatus
+    code::
 
-            result = asyncio.run(enhanced_connection_test())
-            if result.status == ConnectionStatus.CONNECTED_DIRECT:
-                print(f"Online in {result.test_duration_ms}ms")
+        import asyncio
+        from connection_checker import enhanced_connection_test, ConnectionStatus
 
-        Con oggetto di configurazione::
+        result = asyncio.run(enhanced_connection_test())
+        if result.status == ConnectionStatus.CONNECTED_DIRECT:
+            print(f"Online in {result.test_duration_ms}ms")
 
-            from connection_checker import enhanced_connection_test, ConnectionTestConfig
+    with config object::
 
-            config = ConnectionTestConfig(
-                test_urls=["https://mia-api.azienda.it", "https://backup.azienda.it"],
-                timeout=10,
-                global_timeout=30,
-            )
-            result = asyncio.run(enhanced_connection_test(config=config))
-            print(result.status.value, result.message)
+        from connection_checker import enhanced_connection_test, ConnectionTestConfig
 
-        Con URL personalizzati (parametro diretto)::
+        config = ConnectionTestConfig(
+            test_urls=["https://mia-api.azienda.it", "https://backup.azienda.it"],
+            timeout=10,
+            global_timeout=30,
+        )
+        result = asyncio.run(enhanced_connection_test(config=config))
+        print(result.status.value, result.message)
 
-            result = asyncio.run(enhanced_connection_test(
-                test_urls=["https://internal.company.com", "https://www.google.com"],
-                test_all_urls=True,
-            ))
-            for url_result in result.details.get("results_per_url", []):
-                print(f"{url_result['url']}: {'OK' if url_result['success'] else 'FAIL'}")
+    custom URLs (as parameter)::
 
-        Modalità diagnostica completa::
+        result = asyncio.run(enhanced_connection_test(
+            test_urls=["https://internal.company.com", "https://www.google.com"],
+            test_all_urls=True,
+        ))
+        for url_result in result.details.get("results_per_url", []):
+            print(f"{url_result['url']}: {'OK' if url_result['success'] else 'FAIL'}")
 
-            result = asyncio.run(enhanced_connection_test(test_all_urls=True))
-            print(f"Fase raggiunta: {result.details.get('phase_reached', 'N/A')}")
+    Diagnostic mode::
+
+        result = asyncio.run(enhanced_connection_test(test_all_urls=True))
+        print(f"Fase raggiunta: {result.details.get('phase_reached', 'N/A')}")
     """
-    # Se config è fornito, i suoi valori hanno precedenza sui parametri singoli
+    # If config is provided, its values have precedence over individual parameters
     if config is not None:
         test_urls = config.test_urls if config.test_urls is not None else test_urls
         timeout = config.timeout
@@ -1743,11 +2005,11 @@ async def enhanced_connection_test(
         partial_state['phase_completed'] = 2
         partial_state['last_result'] = direct_result
 
-        # Controlla se TUTTI gli errori sono stati SSL (problema orologio di sistema?).
-        # Si usa il totale degli URL effettivamente tentati (ssl + timeout + connection),
-        # non len(urls_to_test): in modalità PERFORMANCE la funzione esce prima di
-        # provare tutti gli URL, quindi confrontare con len(urls_to_test) farebbe sì
-        # che SSL_ERROR non scatti mai in quella modalità.
+        # Check if ALL errors were SSL (system clock issue?).
+        # Use the total of actually attempted URLs (ssl + timeout + connection),
+        # not len(urls_to_test): in PERFORMANCE mode the function exits before
+        # trying all URLs, so comparing with len(urls_to_test) would prevent
+        # SSL_ERROR from ever triggering in that mode.
         error_types = direct_result.get('error_types', {})
         urls_actually_attempted = (
             error_types.get('ssl', 0)
@@ -1934,7 +2196,7 @@ async def enhanced_connection_test(
                 test_all_urls=False
             )
 
-            # Proxy rilevato via scan che richiede autenticazione (407)
+            # Detected proxy requires authentication (407)
             if detected_proxy_result.get('status_code') == 407:
                 duration = int((loop.time() - start_time) * 1000)
                 logger.warning("Detected proxy requires authentication (407)")
@@ -1996,7 +2258,7 @@ async def enhanced_connection_test(
                         'captive_url': captive_result['captive_url'],
                         'portal_type': captive_result['portal_type'],
                         'response_status': captive_result['response_status'],
-                        'test_results': captive_result['test_results']  # Per debugging
+                        'test_results': captive_result['test_results']  # For debugging
                     },
                     requires_action=True,
                     suggested_route='/auth/captive_portal',
@@ -2025,13 +2287,13 @@ async def enhanced_connection_test(
             test_duration_ms=duration
         )
 
-    # Applica il timeout globale con tracciamento dello stato parziale
+    # Apply global timeout with partial state tracking
     try:
         return await asyncio.wait_for(_run_test(), timeout=float(global_timeout))
     except asyncio.TimeoutError:
         logger.error(f"Connection test exceeded global timeout of {global_timeout}s")
 
-        # Restituisce il miglior risultato disponibile basandosi sull'ultima fase completata
+        # Return best available result based on the last phase completed
         if partial_state['phase_completed'] >= 2 and partial_state['last_result']:
             details = {
                 'timeout': True,

@@ -11,138 +11,123 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **Socket TCP invece di UDP** — il test di connettività di base ora usa
-  `SOCK_STREAM` (TCP) invece di `SOCK_DGRAM` (UDP). Con UDP, `socket.connect()`
-  non invia dati né verifica la raggiungibilità effettiva; TCP esegue il
-  three-way handshake, rilevando correttamente l'assenza di rete.
+- **TCP Socket instead of UDP** — the basic connectivity test now uses
+  `SOCK_STREAM` (TCP) instead of `SOCK_DGRAM` (UDP). With UDP, `socket.connect()`
+  does not send data nor verify actual reachability; TCP performs the
+  three-way handshake, correctly detecting the absence of a network.
 
-- **Filtro IP privati nella risoluzione DNS** — `_test_dns_resolution()` ora
-  verifica che gli indirizzi IP restituiti siano pubblici tramite
-  `_is_private_or_local_ip()`. In precedenza, reti aziendali con DNS
-  split-horizon che rispondono con IP interni venivano erroneamente
-  classificate come connesse a Internet.
+- **Private IP filtering in DNS resolution** — `_test_dns_resolution()` now
+  checks that returned IP addresses are public via `_is_private_or_local_ip()`.
+  Previously, corporate networks with split-horizon DNS responding with internal IPs
+  were incorrectly classified as Internet-connected.
 
-- **Validazione risposta HTTP solo su 2xx** — `_is_valid_success_response()`
-  considera valide solo risposte con status code 200–299 e corrispondenza del
-  dominio tra URL richiesto e URL finale (domain match). Risposte 3xx, 4xx o
-  con redirect cross-domain non vengono più accettate come successo.
+- **HTTP response validation only on 2xx** — `_is_valid_success_response()`
+  now only considers responses with status code 200–299 and domain match between
+  requested and final URL as valid. 3xx, 4xx responses or cross-domain redirects
+  are no longer accepted as success.
 
-- **Test del proxy rilevato prima di restituirlo** — `_scan_common_proxy_ports()`
-  ora valida ogni porta aperta con una richiesta HTTP reale attraverso di essa,
-  invece di restituire qualsiasi porta aperta come proxy. Elimina i falsi
-  positivi da server di sviluppo (Node.js, Django, Flask) che usano le stesse
-  porte comuni (8080, 3128, 8888).
+- **Test detected proxy before returning it** — `_scan_common_proxy_ports()`
+  now validates each open port with a real HTTP request through it, instead of
+  returning any open port as a proxy. This eliminates false positives from development
+  servers (Node.js, Django, Flask) using common ports (8080, 3128, 8888).
 
-- **Lock asyncio su `os.environ`** — `unset_proxy_env_async()` protegge la
-  modifica temporanea delle variabili d'ambiente proxy con `_proxy_env_lock`
-  (`asyncio.Lock()`), prevenendo race condition in contesti concorrenti dove
-  più coroutine potrebbero modificare simultaneamente le stesse variabili.
+- **Asyncio lock on `os.environ`** — `unset_proxy_env_async()` protects the
+  temporary modification of proxy environment variables with `_proxy_env_lock`
+  (`asyncio.Lock()`), preventing race conditions in concurrent contexts where
+  multiple coroutines might simultaneously modify the same variables.
 
-- **Supporto risposte captive portal in formato JSON** — il rilevamento del
-  captive portal gestisce correttamente risposte con `Content-Type:
-  application/json` che in precedenza causavano errori di parsing.
+- **Support for captive portal responses in JSON format** — captive portal detection
+  now correctly handles responses with `Content-Type: application/json` that previously
+  caused parsing errors.
 
-- **Rilevamento SSL error con status dedicato** — gli errori SSL/TLS
-  (`aiohttp.ClientSSLError`) sono ora tracciati separatamente in
-  `error_types['ssl']`. Se tutti gli URL falliscono con errori SSL,
-  `enhanced_connection_test()` restituisce `ConnectionStatus.SSL_ERROR`
-  invece di `UNKNOWN_ERROR`, indicando problemi di orologio di sistema o
-  certificati root.
+- **SSL error detection with dedicated status** — SSL/TLS errors
+  (`aiohttp.ClientSSLError`) are now tracked separately in `error_types['ssl']`.
+  If all URLs fail with SSL errors, `enhanced_connection_test()` returns
+  `ConnectionStatus.SSL_ERROR` instead of `UNKNOWN_ERROR`, indicating system clock
+  or root certificate issues.
 
-- **Timeout globale con partial state tracking** — `enhanced_connection_test()`
-  è ora avvolta in `asyncio.wait_for()` con `global_timeout` configurabile
-  (default: 60s). In caso di superamento del timeout, viene restituito
-  `UNKNOWN_ERROR` con `details['timeout']=True` e `details['phase_reached']`
-  che indica l'ultima fase completata prima dell'interruzione, invece di
-  bloccarsi indefinitamente.
+- **Global timeout with partial state tracking** — `enhanced_connection_test()`
+  is now wrapped in `asyncio.wait_for()` with configurable `global_timeout`
+  (default: 60s). On timeout, it returns `UNKNOWN_ERROR` with `details['timeout']=True`
+  and `details['phase_reached']` indicating the last completed phase, instead of
+  hanging indefinitely.
 
-- **Simplified response validation** — rimossa la logica euristica di
-  rilevamento captive portal basata su contenuto HTML, form di login e
-  pattern di redirect che causava falsi negativi su siti legittimi (GitHub,
-  Google, PyPI). Il rilevamento è ora delegato esclusivamente alla fase 5
-  tramite endpoint dedicati con comportamento prevedibile.
+- **Simplified response validation** — removed heuristic captive portal detection
+  logic based on HTML content, login forms, and redirect patterns that caused false
+  negatives on legitimate sites (GitHub, Google, PyPI). Detection is now exclusively
+  delegated to phase 5 via dedicated endpoints with predictable behavior.
 
-- **Mascheramento credenziali proxy** — le credenziali presenti negli URL
-  proxy (`http://user:pass@host:port`) vengono ora rimosse tramite
-  `_mask_proxy_credentials()` prima di qualsiasi operazione di logging,
-  eliminando la fuoriuscita accidentale di username e password nei log.
+- **Proxy credential masking** — credentials in proxy URLs (`http://user:pass@host:port`)
+  are now removed via `_mask_proxy_credentials()` before any logging operation,
+  eliminating accidental leakage of usernames and passwords in logs.
 
-- **Majority vote per rilevamento captive portal** — `_test_captive_portal()`
-  interroga 3 endpoint dedicati di vendor diversi (Google `generate_204`,
-  Microsoft `connecttest.txt`, Firefox `success.txt`) e usa il voto di
-  maggioranza (≥50% dei test conclusivi) per confermare la presenza di un
-  captive portal. Il precedente test su singolo endpoint causava falsi
-  positivi quando un endpoint era temporaneamente irraggiungibile.
+- **Majority vote for captive portal detection** — `_test_captive_portal()`
+  queries 3 dedicated endpoints from different vendors (Google `generate_204`,
+  Microsoft `connecttest.txt`, Firefox `success.txt`) and uses majority vote (≥50%
+  of conclusive tests) to confirm the presence of a captive portal. The previous
+  single-endpoint test caused false positives when an endpoint was temporarily unreachable.
 
-- **Proxy scan asincrono non bloccante** — `_scan_common_proxy_ports()` usa
-  `asyncio.open_connection()` con `asyncio.wait_for()` invece di
-  `socket.connect_ex()` bloccante. La scansione di tutte e 3 le porte non
-  blocca più l'event loop e rispetta i timeout configurati.
+- **Non-blocking async proxy scan** — `_scan_common_proxy_ports()` uses
+  `asyncio.open_connection()` with `asyncio.wait_for()` instead of blocking
+  `socket.connect_ex()`. Scanning all 3 ports no longer blocks the event loop and
+  respects configured timeouts.
 
-- **Inizializzazione di `safe_proxy_url`** — la variabile `safe_proxy_url`
-  viene ora sempre inizializzata a `None` prima del blocco condizionale,
-  eliminando il rischio di `UnboundLocalError` nei percorsi in cui nessuna
-  variabile proxy di sistema è configurata.
+- **Initialization of `safe_proxy_url`** — the `safe_proxy_url` variable is now
+  always initialized to `None` before the conditional block, eliminating the risk
+  of `UnboundLocalError` in code paths where no system proxy variable is configured.
 
-- **Partial state tracking per timeout** — il dizionario `partial_state`
-  viene aggiornato al termine di ogni fase, tenendo traccia dell'ultima fase
-  completata e dell'ultimo risultato disponibile. In caso di timeout globale,
-  queste informazioni sono incluse nel risultato restituito per facilitare la
-  diagnostica.
+- **Partial state tracking for timeout** — the `partial_state` dictionary is updated
+  at the end of each phase, tracking the last completed phase and last available result.
+  In case of global timeout, this information is included in the returned result to
+  facilitate diagnostics.
 
 ---
 
 ### Added
 
-- **`ConnectionTestConfig` dataclass** — nuova classe di configurazione che
-  raggruppa tutti i parametri di `enhanced_connection_test()` (`test_urls`,
-  `timeout`, `test_all_urls`, `global_timeout`) in un oggetto riutilizzabile.
-  Accettata come parametro opzionale `config`; i suoi valori hanno precedenza
-  sui parametri singoli per retrocompatibilità.
+- **`ConnectionTestConfig` dataclass** — new configuration class that groups all
+  parameters of `enhanced_connection_test()` (`test_urls`, `timeout`, `test_all_urls`,
+  `global_timeout`) in a reusable object. Accepted as optional `config` parameter;
+  its values take precedence over single parameters for backward compatibility.
 
-- **Parametro `test_urls` personalizzabile** — `enhanced_connection_test()`
-  accetta ora una lista opzionale di URL da testare che sostituisce
-  completamente la lista di default. Essenziale per reti con proxy che
-  consentono l'accesso solo ad alcuni domini: l'applicazione chiamante può
-  specificare gli URL critici per il proprio caso d'uso invece di affidarsi
-  ai soli URL di default (GitHub, Google, PyPI, npm).
+- **Customizable `test_urls` parameter** — `enhanced_connection_test()` now accepts
+  an optional list of URLs to test, which completely replaces the default list.
+  Essential for networks with proxies that allow access only to certain domains:
+  the calling application can specify critical URLs for its use case instead of
+  relying solely on the default URLs (GitHub, Google, PyPI, npm).
 
-- **Modalità diagnostica `test_all_urls`** — quando `test_all_urls=True`,
-  la funzione testa tutti gli URL della lista invece di uscire al primo
-  successo (modalità performance). Il risultato include
-  `details['results_per_url']` con il dettaglio per ogni URL: utile per
-  diagnosticare accessi selettivi in reti con proxy che bloccano solo alcuni
-  domini.
+- **Diagnostic mode `test_all_urls`** — when `test_all_urls=True`, the function tests
+  all URLs in the list instead of exiting on the first success (performance mode).
+  The result includes `details['results_per_url']` with details for each URL:
+  useful for diagnosing selective access in networks with proxies that block only
+  some domains.
 
-- **Documentazione completa Google-style** — tutte le funzioni, classi e
-  metodi pubblici includono docstring con sezioni `Args`, `Returns`, `Raises`,
-  `Note`, `Examples` e `Security` secondo le Google Python Style Guide.
-  La docstring del modulo descrive l'architettura a 5 fasi, gli stati
-  possibili, le dipendenze e i meccanismi di sicurezza.
+- **Complete Google-style documentation** — all public functions, classes, and methods
+  include docstrings with `Args`, `Returns`, `Raises`, `Note`, `Examples`, and `Security`
+  sections according to the Google Python Style Guide. The module docstring describes
+  the 5-phase architecture, possible states, dependencies, and security mechanisms.
 
 ---
 
 ### Security
 
-- **Nessuna credenziale nei log** — tutti i proxy URL vengono mascherati
-  tramite `_mask_proxy_credentials()` prima di qualsiasi output di logging.
-  La funzione è fail-safe: in caso di URL non parsabile restituisce
-  `[invalid_proxy_url]` invece di propagare eccezioni.
+- **No credentials in logs** — all proxy URLs are masked via `_mask_proxy_credentials()`
+  before any logging output. The function is fail-safe: in case of an unparsable URL,
+  it returns `[invalid_proxy_url]` instead of propagating exceptions.
 
-- **Credential masking end-to-end** — il mascheramento è applicato sia al
-  logging di `enhanced_connection_test()` sia alle docstring e ai messaggi
-  di errore restituiti in `ConnectionTestResult.details`, garantendo che
-  nessun percorso di codice esponga credenziali in chiaro.
+- **Credential masking end-to-end** — masking is applied both to logging in
+  `enhanced_connection_test()` and to docstrings and error messages returned in
+  `ConnectionTestResult.details`, ensuring that no code path exposes credentials in clear text.
 
-- **SSL certificate verification abilitato** — tutte le richieste HTTPS usano
-  `ssl=True` (verifica certificato abilitata per default in aiohttp). Le
-  richieste agli endpoint captive portal usano deliberatamente `ssl=False` e
-  HTTP perché i captive portal intercettano solo il traffico HTTP in chiaro.
+- **SSL certificate verification enabled** — all HTTPS requests use `ssl=True`
+  (certificate verification enabled by default in aiohttp). Requests to captive portal
+  endpoints deliberately use `ssl=False` and HTTP because captive portals only intercept
+  cleartext HTTP traffic.
 
-- **Timeout su ogni fase** — oltre al `global_timeout` sull'intera funzione,
-  ogni singola richiesta HTTP ha un timeout configurabile (`timeout`, default
-  5s), il test socket ha timeout fisso di 1s e la risoluzione DNS ha timeout
-  di 2s per dominio. Nessuna operazione di rete può bloccare indefinitamente.
+- **Timeout on every phase** — in addition to the `global_timeout` on the entire function,
+  each individual HTTP request has a configurable timeout (`timeout`, default 5s),
+  the socket test has a fixed 1s timeout, and DNS resolution has a 2s timeout per domain.
+  No network operation can block indefinitely.
 
 ---
 
@@ -150,28 +135,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **`SSL_ERROR` non rilevabile in modalità performance** — il confronto per
-  determinare se tutti gli URL hanno fallito con errori SSL ora usa il numero
-  di URL *effettivamente tentati* (`ssl + timeout + connection errors`) invece
-  di `len(urls_to_test)`. In modalità PERFORMANCE la funzione esce dopo il primo
-  successo, quindi gli URL non ancora provati non devono essere contati: con il
-  precedente confronto `ssl == len(urls_to_test)` la condizione non poteva mai
-  essere vera in quella modalità.
+- **`SSL_ERROR` not detectable in performance mode** — the check to determine if all URLs
+  failed with SSL errors now uses the number of URLs *actually attempted* (`ssl + timeout + connection errors`)
+  instead of `len(urls_to_test)`. In PERFORMANCE mode, the function exits after the first
+  success, so URLs not yet tried should not be counted: with the previous check
+  `ssl == len(urls_to_test)` the condition could never be true in that mode.
 
-- **`PROXY_STALE` reindirizzava a `/proxy_login` invece di `/settings/proxy`** —
-  `PROXY_STALE` indica che il proxy è obsoleto e la connessione diretta funziona
-  già. L'azione corretta è *rimuovere* la configurazione proxy, non fare login.
-  `suggested_route` cambiato da `'/proxy_login'` a `'/settings/proxy'`.
+- **`PROXY_STALE` redirected to `/proxy_login` instead of `/settings/proxy`** —
+  `PROXY_STALE` indicates that the proxy is obsolete and direct connection already works.
+  The correct action is to *remove* the proxy configuration, not to log in.
+  `suggested_route` changed from `'/proxy_login'` to `'/settings/proxy'`.
 
-- **`PROXY_AUTH_FAILED` non restituito per proxy rilevato via port scan** — se
-  la scansione porte individuava un proxy che rispondeva HTTP 407, il 407 non
-  veniva intercettato nella fase 4 e il flusso cadeva silenziosamente al test
-  captive portal, potenzialmente restituendo `CAPTIVE_PORTAL` o `UNKNOWN_ERROR`
-  invece di `PROXY_AUTH_FAILED`. Aggiunto controllo esplicito su `status_code == 407`
-  dopo `_test_http_via_proxy()` nella fase 4.
+- **`PROXY_AUTH_FAILED` not returned for proxy detected via port scan** — if port scan
+  detected a proxy responding with HTTP 407, the 407 was not intercepted in phase 4 and
+  the flow silently fell through to captive portal testing, potentially returning
+  `CAPTIVE_PORTAL` or `UNKNOWN_ERROR` instead of `PROXY_AUTH_FAILED`. Explicit check
+  for `status_code == 407` added after `_test_http_via_proxy()` in phase 4.
 
-- **Comportamento non documentato quando proxy da scan non supera validazione** —
-  aggiunta nota nella docstring di `_scan_common_proxy_ports()` che esplicita
-  il comportamento quando una porta aperta non supera la validazione HTTP: la
-  scansione continua con la porta successiva e, se nessuna porta è un proxy
-  funzionante, si prosegue alla fase 5 (captive portal).
+- **Undocumented behavior when scanned proxy does not pass validation** — added note
+  in the docstring of `_scan_common_proxy_ports()` explaining the behavior when an open
+  port does not pass HTTP validation: the scan continues with the next port and, if no
+  port is a working proxy, proceeds to phase 5 (captive portal).
+
+### Documentation
+
+- **Bilingual documentation** — All documentation (README, changelog, and main usage instructions)
+  is now available in both English and Italian. The English version is the main reference for
+  international users, while the Italian version is provided for native speakers and legacy users.
+
