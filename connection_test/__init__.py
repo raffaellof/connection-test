@@ -1,4 +1,4 @@
-"""connection-test — advanced network connectivity diagnostics.
+"""connection_test — advanced network connectivity diagnostics.
 
 (EN) Python package to accurately detect Internet connection status,
 distinguishing scenarios such as no network, LAN only, captive portal,

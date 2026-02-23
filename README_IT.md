@@ -1,6 +1,6 @@
-# connection-test
+# advanced-connection-test
 
-**connection-test** è un package Python per la diagnosi avanzata della connettività di rete.
+**advanced-connection-test** è un package Python per la diagnosi avanzata della connettività di rete.
 Permette di distinguere con precisione tra vari stati di rete — assenza di connessione, solo LAN,
 captive portal, proxy obbligatorio, errori SSL e connessione funzionante — in modo robusto,
 sicuro e trasparente.
@@ -16,7 +16,7 @@ Fornire uno strumento affidabile per:
 ## Installazione
 
 ```bash
-pip install connection-test
+pip install advanced-connection-test
 ```
 
 Oppure, per sviluppo locale con dipendenze di test:

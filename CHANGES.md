@@ -163,3 +163,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is now available in both English and Italian. The English version is the main reference for
   international users, while the Italian version is provided for native speakers and legacy users.
 
+---
+
+## [0.1.2] — 2026
+
+### Changed
+
+- **Package renamed on PyPI** — the published package name has changed from
+  `connection-test` (rejected by PyPI as not allowed) to **`advanced-connection-test`**.
+  The Python module name, all imports, and the internal directory structure remain
+  unchanged: `import connection_test` continues to work as before.
+  Install with: `pip install advanced-connection-test`
+
