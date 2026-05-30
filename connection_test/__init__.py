@@ -53,7 +53,7 @@ from connection_test.connection_checker import (
     ConnectionTestConfig,
 )
 
-__version__ = "0.1.1"
+__version__ = "0.1.2"
 
 __all__ = [
     "enhanced_connection_test",
