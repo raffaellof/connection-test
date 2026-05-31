@@ -9,7 +9,7 @@ Designed for use by applications that need to adapt their
 behavior based on the actual connectivity status.
 
 Architecture:
-    The test is divided into 6 sequential phases (Phase 0–5) with an early exit on the first success:
+    The test is divided into 6 sequential phases (Phase 0–5) with early-exit:
 
     Phase 0 — Pre-check proxy variables (preparatory):
         Reads the HTTP_PROXY/HTTPS_PROXY environment variables before any
@@ -17,23 +17,24 @@ Architecture:
         and updates partial_state for global timeout tracking.
         Does not produce any results: always continues.
 
-    Phase 1 — Socket (physical/transport layer):
-        Checks for the presence of an active network interface via a TCP connection
-        to a public DNS server. Fails only if no local network exists.
+    Phase 1 — Connectivity baseline (Socket + DNS):
+        First checks for the presence of an active network interface via TCP,
+        then validates DNS resolution on multiple known public domains.
+        Fails as NO_CONNECTION (socket) or LAN_ONLY (DNS).
 
-    Phase 2 — DNS (Network Layer):
-        Resolves multiple known public domains and verifies that the obtained IPs are
-        true public (not local DNS responses from corporate networks).
-        Requires at least two valid resolutions on separate domains.
-
-    Phase 3 — Direct HTTP (Application Layer):
+    Phase 2 — Direct HTTP (Application Layer):
         Attempts HTTPS requests to configured URLs without a proxy. Only 2xx responses on the same requested domain are
         considered valid. Supports diagnostic mode (testing all URLs) and performance mode (early exit).
+        If direct works while env proxy variables are configured, returns PROXY_STALE.
 
-    Phase 4 — Proxy (Detection and Test):
+    Phase 3 — Configured Proxy:
         If the HTTP_PROXY/HTTPS_PROXY environment variables are configured,
-        it tests them directly. If not configured, it scans common
-        ports (8080, 3128, 8888) with validation via a real HTTP request.
+        it tests them directly. Handles PROXY_AUTH_FAILED (407), CONNECTED_PROXY,
+        PROXY_STALE (when direct now works), and CAPTIVE_PORTAL_PROXY.
+
+    Phase 4 — Proxy Scan:
+        If no configured proxy solved the issue, scans common local proxy ports
+        (8080, 3128, 8888) with validation via a real HTTP request.
 
     Phase 5 — Captive portal (majority vote detection):
         Query 3 dedicated endpoints (Google, Microsoft, Firefox) and use the
@@ -44,7 +45,7 @@ States:
     NO_CONNECTION: No active network interface (cable unplugged, Wi-Fi off).
     LAN_ONLY: Local network working, Internet unreachable (DNS fails).
     CAPTIVE_PORTAL: Access blocked by authentication portal (hotel, airport).
-    CAPTIVE_PORTAL_PROXY: Captive portal detected behind a proxy.
+    CAPTIVE_PORTAL_PROXY: Captive portal detected when proxy environment is configured.
     PROXY_REQUIRED: Proxy required to access the Internet (corporate network).
     PROXY_AUTH_FAILED: Proxy configured but authentication failed (407).
     PROXY_STALE: Outdated proxy configuration; direct connection now works.
@@ -452,12 +453,15 @@ async def unset_proxy_env_async():
     lowercase) per la durata del blocco ``async with``, poi le ripristina
     ai valori originali all'uscita, anche in caso di eccezione.
 
-    (EN) Used internally to execute direct HTTP requests (without proxies)
-    even when the environment has proxies configured, ensuring that tests
-    in Phases 1-2 are not affected by system proxies.
+    (EN) Used internally as a defensive guard to execute direct HTTP requests
+    without proxy environment influence. In current aiohttp usage, sessions are
+    created without trust_env=True (default behavior), so env proxies are already
+    ignored; this context manager still protects against future regressions.
     (IT) Utilizzato internamente per eseguire richieste HTTP dirette (senza proxy)
-    anche quando l'ambiente ha proxy configurati, garantendo che i test
-    delle fasi 1-2 non siano influenzati da proxy di sistema.
+    anche quando l'ambiente ha proxy configurati, come misura difensiva.
+    Nell'uso corrente di aiohttp, le sessioni sono create senza trust_env=True
+    (comportamento di default), quindi i proxy env sono già ignorati; il contesto
+    resta utile per prevenire regressioni future.
 
     Yields:
         (EN) None: yields control to the ``async with`` block with proxy variables
@@ -968,7 +972,7 @@ Examples:
           se tutti gli URL falliscono con errori SSL, enhanced_connection_test
           può restituire ConnectionStatus.SSL_ERROR invece di UNKNOWN_ERROR.
         - Le variabili proxy di sistema vengono temporaneamente rimosse tramite
-          ``unset_proxy_env_async()`` per garantire un test diretto reale.
+          ``unset_proxy_env_async()`` come salvaguardia difensiva.
         - Nessuna credenziale viene loggata.
     """
     timeout_obj = aiohttp.ClientTimeout(total=timeout)
@@ -2038,6 +2042,24 @@ async def enhanced_connection_test(
         if direct_result['success']:
             duration = int((loop.time() - start_time) * 1000)
 
+            if proxy_env_configured:
+                logger.warning("Configured proxy appears stale: direct access is working")
+
+                return ConnectionTestResult(
+                    status=ConnectionStatus.PROXY_STALE,
+                    message="Configurazione proxy obsoleta. La connessione diretta funziona.",
+                    details={
+                        'old_proxy_url': safe_proxy_url,
+                        'direct_now_works': True,
+                        'detected_during_phase': 2,
+                        'duration_ms': duration
+                    },
+                    requires_action=True,
+                    suggested_route='/settings/proxy',
+                    detected_proxy_url=None,
+                    test_duration_ms=duration
+                )
+
             details = {
                 'connection_type': 'transparent_proxy' if direct_result['detected_proxy_via_headers'] else 'direct',
                 'duration_ms': duration
@@ -2140,7 +2162,7 @@ async def enhanced_connection_test(
 
             # Proxy failed, check if direct now works (stale proxy config)
             logger.debug("Proxy failed, re-testing direct access...")
-            direct_retest = await _test_http_direct(urls_to_test, timeout=2, test_all_urls=False)
+            direct_retest = await _test_http_direct(urls_to_test, timeout=timeout, test_all_urls=False)
 
             if direct_retest['success']:
                 duration = int((loop.time() - start_time) * 1000)
@@ -2161,6 +2183,31 @@ async def enhanced_connection_test(
                 )
 
             # Proxy configured but not working
+            captive_result_proxy = await _test_captive_portal(timeout)
+            partial_state['last_result'] = captive_result_proxy
+
+            if captive_result_proxy['is_captive']:
+                duration = int((loop.time() - start_time) * 1000)
+                logger.warning("Captive portal detected with proxy environment configured")
+
+                return ConnectionTestResult(
+                    status=ConnectionStatus.CAPTIVE_PORTAL_PROXY,
+                    message="Captive portal rilevato in presenza di proxy configurato.",
+                    details={
+                        'proxy_url': safe_proxy_url if proxy_url else None,
+                        'captive_url': captive_result_proxy['captive_url'],
+                        'portal_type': captive_result_proxy['portal_type'],
+                        'response_status': captive_result_proxy['response_status'],
+                        'test_results': captive_result_proxy['test_results'],
+                        'duration_ms': duration
+                    },
+                    requires_action=True,
+                    suggested_route='/auth/captive_portal',
+                    detected_proxy_url=safe_proxy_url,
+                    captive_portal_url=captive_result_proxy['captive_url'],
+                    test_duration_ms=duration
+                )
+
             duration = int((loop.time() - start_time) * 1000)
             logger.warning("Proxy configured but not working")
 

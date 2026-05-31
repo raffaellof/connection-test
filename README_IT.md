@@ -94,7 +94,7 @@ for url_result in result.details.get("results_per_url", []):
 | `NO_CONNECTION` | Nessuna interfaccia di rete attiva | No |
 | `LAN_ONLY` | Rete locale OK, Internet non raggiungibile (DNS fallisce) | No |
 | `CAPTIVE_PORTAL` | Accesso bloccato da portale di autenticazione | **Sì** |
-| `CAPTIVE_PORTAL_PROXY` | Captive portal raggiungibile solo tramite proxy *(riservato, non ancora emesso)* | **Sì** |
+| `CAPTIVE_PORTAL_PROXY` | Captive portal rilevato con proxy configurato nelle env vars | **Sì** |
 | `PROXY_REQUIRED` | Proxy necessario ma non configurato (rilevato su porta locale) | **Sì** |
 | `PROXY_AUTH_FAILED` | Proxy configurato (o rilevato) ma autenticazione fallita (HTTP 407) | **Sì** |
 | `PROXY_STALE` | Configurazione proxy obsoleta; la connessione diretta ora funziona | **Sì** |
@@ -133,95 +133,94 @@ Separare la lettura delle env vars dall'esecuzione permette di avere sempre
 
 ---
 
-### Phase 1 — Socket TCP
+### Phase 1 — Baseline di connettività (Socket TCP + DNS)
 
 **Cosa fa:**
-Verifica se almeno un'interfaccia di rete è attiva tentando una connessione TCP
-a `8.8.8.8:53` (server DNS pubblico di Google).
+Verifica prima se almeno un'interfaccia di rete è attiva con una connessione TCP
+a `8.8.8.8:53` (server DNS pubblico di Google), poi valida la risoluzione DNS.
 
 **Come fa:**
-Crea un socket `SOCK_STREAM` (TCP) con timeout di 1 secondo. Il three-way handshake
-TCP conferma che il pacchetto raggiunge effettivamente la destinazione.
+1. Crea un socket `SOCK_STREAM` (TCP) con timeout di 1 secondo.
+2. Risolve 3 domini pubblici (`www.google.com`, `github.com`, `cloudflare.com`)
+   con timeout di 2 secondi per dominio.
+3. Richiede almeno 2 risoluzioni con IP pubblici (non RFC 1918, non loopback, non link-local).
 
 **Perché:**
-È il test più rapido e basilare. Un fallimento qui indica problemi a livello fisico:
-cavo scollegato, Wi-Fi disattivato, driver di rete non funzionante.
+Separa rapidamente problemi di trasporto da problemi di raggiungibilità Internet.
+Il fallimento socket indica problemi fisici/link (cavo scollegato, Wi-Fi off, driver guasto).
+Il fallimento DNS con socket OK indica tipicamente LAN-only o split-horizon DNS.
 UDP (`SOCK_DGRAM`) non viene usato perché `socket.connect()` con UDP non invia
 dati né verifica la raggiungibilità, restituendo sempre successo anche senza rete.
 
-**Esito:** `NO_CONNECTION` se fallisce.
+**Esiti:** `NO_CONNECTION` (socket fallito) oppure `LAN_ONLY` (DNS fallito).
 
 ---
 
-### Phase 2 — Risoluzione DNS
-
-**Cosa fa:**
-Risolve 3 domini pubblici noti (`www.google.com`, `github.com`, `cloudflare.com`)
-e verifica che gli indirizzi IP restituiti siano effettivamente pubblici.
-
-**Come fa:**
-Usa `asyncio.get_running_loop().getaddrinfo()` con timeout di 2 secondi per dominio.
-Richiede almeno 2 risoluzioni con IP pubblici (non RFC 1918, non loopback,
-non link-local) per considerare il DNS funzionante.
-
-**Perché:**
-Reti aziendali con DNS split-horizon possono rispondere a qualsiasi query con IP
-interni, simulando un DNS funzionante pur non avendo accesso a Internet. La soglia
-di 2 domini su 3 tolera un singolo endpoint temporaneamente irraggiungibile.
-
-**Esito:** `LAN_ONLY` se fallisce.
-
----
-
-### Phase 3 — HTTP diretto
+### Phase 2 — HTTP diretto
 
 **Cosa fa:**
 Effettua richieste HTTPS agli URL configurati senza proxy, verificando status 2xx
 e corrispondenza del dominio tra URL richiesto e URL finale della risposta.
 
 **Come fa:**
-Usa `aiohttp.ClientSession` con `unset_proxy_env_async()` per disabilitare
-temporaneamente le variabili proxy di sistema e garantire un test davvero diretto.
+Usa `aiohttp.ClientSession` senza `trust_env=True` (comportamento di default),
+quindi aiohttp ignora le env vars proxy. `unset_proxy_env_async()` resta come
+salvaguardia difensiva.
 Supporta due modalità: **performance** (early-exit al primo successo) e
 **diagnostica** (`test_all_urls=True`, testa tutti gli URL).
 
 **Perché:**
 Verifica la connettività applicativa reale. Il domain match rileva i redirect
 cross-domain tipici dei captive portal. Il conteggio separato degli errori SSL
-permette di distinguere `SSL_ERROR` da altri fallimenti.
+permette di distinguere `SSL_ERROR` da altri fallimenti. Se la connessione
+diretta funziona mentre un proxy è configurato nelle env vars, la configurazione
+proxy è considerata obsoleta.
 
-**Esiti:** `CONNECTED_DIRECT` (successo), `SSL_ERROR` (tutti gli URL tentati
+**Esiti:** `CONNECTED_DIRECT` (successo senza proxy configurato),
+`PROXY_STALE` (diretta OK con proxy configurato), `SSL_ERROR` (tutti gli URL tentati
 hanno restituito errori SSL — in modalità performance si confronta con gli URL
 effettivamente tentati, non con la lista completa), oppure prosegue alla fase
 successiva.
 
 ---
 
-### Phase 4 — Proxy
+### Phase 3 — Proxy configurato
 
 **Cosa fa:**
-Se `HTTP_PROXY`/`HTTPS_PROXY` sono configurate, testa il proxy. Altrimenti,
-scansiona le porte locali 8080, 3128 e 8888 cercando un proxy non dichiarato.
+Se `HTTP_PROXY`/`HTTPS_PROXY` sono configurate, testa esplicitamente quel proxy.
 
 **Come fa:**
-- *Proxy configurato:* invia le stesse richieste HTTPS passando il proxy.
-  Un HTTP 407 indica autenticazione richiesta. Se il proxy fallisce ma la
-  connessione diretta ora funziona, il proxy è obsoleto (`PROXY_STALE`): in
-  questo caso `suggested_route` è `/settings/proxy` (non `/proxy_login`) perché
-  l'azione corretta è **rimuovere** la configurazione proxy, non fare login.
-- *Scansione porte:* usa `asyncio.open_connection()` con timeout 0.5s per
-  porta. Ogni porta aperta viene validata con una richiesta HTTP reale attraverso
-  di essa. Un HTTP 407 dal proxy rilevato via scan restituisce `PROXY_AUTH_FAILED`
-  con `suggested_route='/proxy_login'`. Se la porta è aperta ma non è un proxy
-  (es. server di sviluppo), la scansione continua silenziosamente.
+Invia richieste HTTPS attraverso il proxy configurato (`proxy=...` nella request aiohttp).
+- HTTP 407 restituisce `PROXY_AUTH_FAILED`.
+- Successo del proxy restituisce `CONNECTED_PROXY`.
+- Se proxy fallisce ma il retest diretto riesce, restituisce `PROXY_STALE`.
+- Se falliscono sia proxy sia retest diretto, esegue rilevamento captive portal:
+  - captive portal rilevato → `CAPTIVE_PORTAL_PROXY`
+  - captive portal non rilevato → `PROXY_REQUIRED`
 
 **Perché:**
-In reti aziendali l'accesso diretto è spesso bloccato e il proxy è obbligatorio.
-La scansione porte rileva proxy installati localmente ma non configurati nelle
-variabili d'ambiente (es. Squid, Charles, Burp Suite).
+Questa fase distingue credenziali errate, proxy obsoleto,
+reti proxy-dependent e scenari captive portal in presenza di proxy configurato.
 
-**Esiti:** `CONNECTED_PROXY`, `PROXY_AUTH_FAILED` (da proxy configurato o da
-proxy rilevato via scan), `PROXY_STALE`, `PROXY_REQUIRED`.
+**Esiti:** `CONNECTED_PROXY`, `PROXY_AUTH_FAILED`, `PROXY_STALE`,
+`CAPTIVE_PORTAL_PROXY`, `PROXY_REQUIRED`.
+
+---
+
+### Phase 4 — Proxy scan
+
+**Cosa fa:**
+Se nessun proxy configurato ha risolto il problema, scansiona le porte locali
+8080, 3128 e 8888 cercando un proxy non dichiarato.
+
+**Come fa:**
+Usa `asyncio.open_connection()` con timeout 0.5s per porta.
+Ogni porta aperta viene validata con una richiesta HTTP reale attraverso di essa.
+- HTTP 407 da proxy rilevato restituisce `PROXY_AUTH_FAILED`.
+- Proxy rilevato funzionante restituisce `PROXY_REQUIRED`.
+- Porte aperte non-proxy vengono ignorate.
+
+**Esito:** `PROXY_AUTH_FAILED`, `PROXY_REQUIRED`, oppure prosegue.
 
 ---
 
