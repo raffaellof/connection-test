@@ -306,15 +306,13 @@ class TestPhase4Proxy:
 
     @pytest.mark.asyncio
     async def test_proxy_stale(self):
-        """Scenario PROXY_STALE: proxy configurato non funziona, diretta sì.
+        """Scenario PROXY_STALE: proxy configurato ma diretta già funzionante.
 
-        Simula proxy configurato in env vars che fallisce (connessione rifiutata),
-        ma il re-test diretto (senza proxy) ha successo. Indica configurazione
-        proxy obsoleta.
+        Simula proxy configurato in env vars ma connessione diretta funzionante
+        già in fase HTTP diretta. Il risultato deve segnalare proxy obsoleto
+        senza passare dal test proxy configurato.
         Atteso: ConnectionStatus.PROXY_STALE.
         """
-        import aiohttp as _aiohttp
-
         env = {
             "HTTPS_PROXY": "http://old-proxy.company.com:3128",
             "HTTP_PROXY": "http://old-proxy.company.com:3128",
@@ -323,28 +321,8 @@ class TestPhase4Proxy:
         with _patch_socket_ok(), _patch_dns_ok():
             with patch("connection_test.connection_checker.os.getenv", side_effect=lambda k, d=None: env.get(k, d)):
                 with patch("connection_test.connection_checker.aiohttp.ClientSession") as mock_cs:
-                    call_count = {"n": 0}
-
-                    def make_session(*args, **kwargs):
-                        call_count["n"] += 1
-                        session = MagicMock()
-                        session.__aenter__ = AsyncMock(return_value=session)
-                        session.__aexit__ = AsyncMock(return_value=False)
-                        if call_count["n"] <= 2:
-                            # Direct (1) e proxy (2): entrambi falliscono
-                            get_ctx = MagicMock()
-                            get_ctx.__aenter__ = AsyncMock(
-                                side_effect=_aiohttp.ClientConnectionError("refused")
-                            )
-                            get_ctx.__aexit__ = AsyncMock(return_value=False)
-                        else:
-                            # Re-test direct (3): ha successo
-                            resp = _make_aiohttp_response(200, "https://github.com")
-                            get_ctx = resp
-                        session.get = MagicMock(return_value=get_ctx)
-                        return session
-
-                    mock_cs.side_effect = make_session
+                    resp = _make_aiohttp_response(200, "https://github.com")
+                    mock_cs.return_value = _make_aiohttp_session(resp)
 
                     result = await enhanced_connection_test(
                         test_urls=["https://github.com"],
@@ -353,6 +331,138 @@ class TestPhase4Proxy:
 
         assert result.status == ConnectionStatus.PROXY_STALE
         assert result.requires_action is True
+        assert result.suggested_route == "/settings/proxy"
+        assert result.details.get("old_proxy_url") == "http://old-proxy.company.com:3128"
+        assert result.details.get("direct_now_works") is True
+        assert result.details.get("detected_during_phase") == 2
+        assert isinstance(result.details.get("duration_ms"), int)
+
+    @pytest.mark.asyncio
+    async def test_proxy_stale_retest_uses_configured_timeout(self):
+        """Scenario PROXY_STALE via retest: usa timeout configurato, non hardcoded.
+
+        Simula direct fail, proxy fail, poi retest direct success.
+        Verifica che il retest riceva lo stesso timeout passato a
+        enhanced_connection_test.
+        """
+        env = {
+            "HTTPS_PROXY": "http://old-proxy.company.com:3128",
+            "HTTP_PROXY": "http://old-proxy.company.com:3128",
+        }
+
+        direct_calls = []
+
+        async def fake_direct(urls, timeout=5, test_all_urls=False):
+            direct_calls.append(timeout)
+            if len(direct_calls) == 1:
+                return {
+                    "success": False,
+                    "status_code": None,
+                    "url_tested": None,
+                    "headers": None,
+                    "content_type": None,
+                    "error": "All URLs failed",
+                    "detected_proxy_via_headers": False,
+                    "error_types": {"ssl": 0, "timeout": 0, "connection": 1},
+                }
+            return {
+                "success": True,
+                "status_code": 200,
+                "url_tested": "https://github.com",
+                "headers": {},
+                "content_type": "text/html",
+                "error": None,
+                "detected_proxy_via_headers": False,
+                "error_types": {"ssl": 0, "timeout": 0, "connection": 0},
+            }
+
+        async def fake_proxy(urls, proxy_url, timeout=5, test_all_urls=False):
+            return {
+                "success": False,
+                "status_code": None,
+                "url_tested": None,
+                "headers": None,
+                "content_type": None,
+                "error": "All proxy attempts failed",
+                "detected_proxy_via_headers": False,
+            }
+
+        with _patch_socket_ok(), _patch_dns_ok():
+            with patch("connection_test.connection_checker.os.getenv", side_effect=lambda k, d=None: env.get(k, d)):
+                with patch("connection_test.connection_checker._test_http_direct", side_effect=fake_direct):
+                    with patch("connection_test.connection_checker._test_http_via_proxy", side_effect=fake_proxy):
+                        with patch("connection_test.connection_checker._test_captive_portal", new=AsyncMock(return_value={"is_captive": False})):
+                            result = await enhanced_connection_test(
+                                test_urls=["https://github.com"],
+                                timeout=7,
+                                global_timeout=10,
+                            )
+
+        assert result.status == ConnectionStatus.PROXY_STALE
+        assert direct_calls == [7, 7]
+
+    @pytest.mark.asyncio
+    async def test_captive_portal_proxy(self):
+        """Scenario CAPTIVE_PORTAL_PROXY: proxy configurato, captive portal rilevato.
+
+        Simula fallimento direct, fallimento proxy configurato, fallimento retest
+        direct e poi captive portal confermato.
+        Atteso: ConnectionStatus.CAPTIVE_PORTAL_PROXY.
+        """
+        env = {
+            "HTTPS_PROXY": "http://proxy.company.com:3128",
+            "HTTP_PROXY": "http://proxy.company.com:3128",
+        }
+
+        async def fake_direct(urls, timeout=5, test_all_urls=False):
+            return {
+                "success": False,
+                "status_code": None,
+                "url_tested": None,
+                "headers": None,
+                "content_type": None,
+                "error": "All URLs failed",
+                "detected_proxy_via_headers": False,
+                "error_types": {"ssl": 0, "timeout": 0, "connection": 1},
+            }
+
+        async def fake_proxy(urls, proxy_url, timeout=5, test_all_urls=False):
+            return {
+                "success": False,
+                "status_code": None,
+                "url_tested": None,
+                "headers": None,
+                "content_type": None,
+                "error": "All proxy attempts failed",
+                "detected_proxy_via_headers": False,
+            }
+
+        captive_payload = {
+            "is_captive": True,
+            "captive_url": "http://192.168.1.1/login",
+            "portal_type": "redirect",
+            "response_status": 302,
+            "test_results": [
+                {"endpoint": "google", "is_captive": True},
+                {"endpoint": "microsoft", "is_captive": True},
+                {"endpoint": "firefox", "is_captive": False},
+            ],
+        }
+
+        with _patch_socket_ok(), _patch_dns_ok():
+            with patch("connection_test.connection_checker.os.getenv", side_effect=lambda k, d=None: env.get(k, d)):
+                with patch("connection_test.connection_checker._test_http_direct", side_effect=fake_direct):
+                    with patch("connection_test.connection_checker._test_http_via_proxy", side_effect=fake_proxy):
+                        with patch("connection_test.connection_checker._test_captive_portal", new=AsyncMock(return_value=captive_payload)):
+                            result = await enhanced_connection_test(
+                                test_urls=["https://github.com"],
+                                timeout=5,
+                                global_timeout=10,
+                            )
+
+        assert result.status == ConnectionStatus.CAPTIVE_PORTAL_PROXY
+        assert result.requires_action is True
+        assert result.suggested_route == "/auth/captive_portal"
 
     @pytest.mark.asyncio
     async def test_proxy_required_detected(self):
@@ -596,7 +706,5 @@ def _patch_dns_ok():
         loop.getaddrinfo = MagicMock(side_effect=lambda *a, **kw: fake_getaddrinfo(*a, **kw))
         mock_loop.return_value = loop
         yield mock_loop
-
-
 
 

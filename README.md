@@ -93,7 +93,7 @@ for url_result in result.details.get("results_per_url", []):
 | `NO_CONNECTION` | No active network interface | No |
 | `LAN_ONLY` | Local network OK, Internet unreachable (DNS fails) | No |
 | `CAPTIVE_PORTAL` | Access blocked by authentication portal | **Yes** |
-| `CAPTIVE_PORTAL_PROXY` | Captive portal reachable only via proxy *(reserved, not yet issued)* | **Yes** |
+| `CAPTIVE_PORTAL_PROXY` | Captive portal detected with proxy environment configured | **Yes** |
 | `PROXY_REQUIRED` | Proxy required but not configured (detected on local port) | **Yes** |
 | `PROXY_AUTH_FAILED` | Proxy configured (or detected) but authentication failed (HTTP 407) | **Yes** |
 | `PROXY_STALE` | Outdated proxy configuration; direct connection now works | **Yes** |
@@ -131,94 +131,91 @@ available for logs even in case of global timeout (the `partial_state` is update
 
 ---
 
-### Phase 1 — TCP Socket
+### Phase 1 — Connectivity Baseline (TCP Socket + DNS)
 
 **What it does:**
-Checks if at least one network interface is active by attempting a TCP connection
-to `8.8.8.8:53` (Google's public DNS server).
+First checks if at least one network interface is active by attempting a TCP connection
+to `8.8.8.8:53` (Google's public DNS server), then validates DNS resolution.
 
 **How:**
-Creates a `SOCK_STREAM` (TCP) socket with a 1-second timeout. The TCP three-way handshake
-confirms that the packet actually reaches the destination.
+1. Creates a `SOCK_STREAM` (TCP) socket with a 1-second timeout.
+2. Resolves 3 public domains (`www.google.com`, `github.com`, `cloudflare.com`)
+   with a 2-second timeout per domain.
+3. Requires at least 2 resolutions with public IPs (not RFC 1918, not loopback, not link-local).
 
 **Why:**
-This is the fastest and most basic test. Failure here indicates physical layer issues:
-unplugged cable, Wi-Fi off, non-working network driver.
+This quickly separates transport-level failure from Internet reachability.
+Socket failure indicates physical/link issues (unplugged cable, Wi-Fi off, broken driver).
+DNS failure with socket success indicates LAN-only/split-horizon conditions.
 UDP (`SOCK_DGRAM`) is not used because `socket.connect()` with UDP does not send
 data nor verify reachability, always returning success even without a network.
 
-**Outcome:** `NO_CONNECTION` if it fails.
+**Outcomes:** `NO_CONNECTION` (socket fail) or `LAN_ONLY` (DNS fail).
 
 ---
 
-### Phase 2 — DNS Resolution
-
-**What it does:**
-Resolves 3 well-known public domains (`www.google.com`, `github.com`, `cloudflare.com`)
-and checks that the returned IP addresses are actually public.
-
-**How:**
-Uses `asyncio.get_running_loop().getaddrinfo()` with a 2-second timeout per domain.
-Requires at least 2 resolutions with public IPs (not RFC 1918, not loopback,
-not link-local) to consider DNS working.
-
-**Why:**
-Corporate networks with split-horizon DNS may respond to any query with internal IPs,
-simulating a working DNS even without Internet access. The 2 out of 3 threshold
-tolerates a single temporarily unreachable endpoint.
-
-**Outcome:** `LAN_ONLY` if it fails.
-
----
-
-### Phase 3 — Direct HTTP
+### Phase 2 — Direct HTTP
 
 **What it does:**
 Performs HTTPS requests to the configured URLs without a proxy, checking for 2xx status
 and domain match between requested URL and final response URL.
 
 **How:**
-Uses `aiohttp.ClientSession` with `unset_proxy_env_async()` to temporarily disable
-system proxy environment variables and ensure a truly direct test.
+Uses `aiohttp.ClientSession` without `trust_env=True` (default behavior), so proxy env vars
+are ignored by aiohttp. `unset_proxy_env_async()` is kept as a defensive safeguard.
 Supports two modes: **performance** (early-exit on first success) and
 **diagnostic** (`test_all_urls=True`, tests all URLs).
 
 **Why:**
 Verifies real application connectivity. Domain match detects cross-domain redirects
 typical of captive portals. Separate SSL error counting allows distinguishing
-`SSL_ERROR` from other failures.
+`SSL_ERROR` from other failures. If direct connectivity works while a proxy is configured
+in env vars, that proxy configuration is considered stale.
 
-**Outcomes:** `CONNECTED_DIRECT` (success), `SSL_ERROR` (all attempted URLs
+**Outcomes:** `CONNECTED_DIRECT` (success without configured proxy),
+`PROXY_STALE` (direct works with configured proxy), `SSL_ERROR` (all attempted URLs
 returned SSL errors — in performance mode, only the actually attempted URLs are considered),
 or proceeds to the next phase.
 
 ---
 
-### Phase 4 — Proxy
+### Phase 3 — Configured Proxy
 
 **What it does:**
-If `HTTP_PROXY`/`HTTPS_PROXY` are configured, tests the proxy. Otherwise,
-scans local ports 8080, 3128, and 8888 looking for an undeclared proxy.
+If `HTTP_PROXY`/`HTTPS_PROXY` are configured, tests that proxy explicitly.
 
 **How:**
-- *Configured proxy:* sends the same HTTPS requests through the proxy.
-  An HTTP 407 indicates authentication required. If the proxy fails but direct
-  connection now works, the proxy is stale (`PROXY_STALE`): in this case
-  `suggested_route` is `/settings/proxy` (not `/proxy_login`) because the correct
-  action is to **remove** the proxy configuration, not to log in.
-- *Port scan:* uses `asyncio.open_connection()` with a 0.5s timeout per port.
-  Each open port is validated with a real HTTP request through it. An HTTP 407
-  from a proxy detected via scan returns `PROXY_AUTH_FAILED` with
-  `suggested_route='/proxy_login'`. If the port is open but not a proxy (e.g.,
-  development server), the scan continues silently.
+Sends HTTPS requests through the configured proxy (`proxy=...` in aiohttp request).
+- HTTP 407 returns `PROXY_AUTH_FAILED`.
+- Successful proxy requests return `CONNECTED_PROXY`.
+- If proxy fails and direct re-test succeeds, returns `PROXY_STALE`.
+- If both proxy and direct re-test fail, captive portal detection is executed:
+  - captive portal detected → `CAPTIVE_PORTAL_PROXY`
+  - captive portal not detected → `PROXY_REQUIRED`
 
 **Why:**
-In corporate networks, direct access is often blocked and a proxy is mandatory.
-Port scanning detects locally installed proxies not configured in environment variables
-(e.g., Squid, Charles, Burp Suite).
+This phase distinguishes invalid credentials, stale proxy settings,
+proxy-dependent networks, and captive portal scenarios in proxy-configured environments.
 
-**Outcomes:** `CONNECTED_PROXY`, `PROXY_AUTH_FAILED` (from configured or scanned proxy),
-`PROXY_STALE`, `PROXY_REQUIRED`.
+**Outcomes:** `CONNECTED_PROXY`, `PROXY_AUTH_FAILED`, `PROXY_STALE`,
+`CAPTIVE_PORTAL_PROXY`, `PROXY_REQUIRED`.
+
+---
+
+### Phase 4 — Proxy Scan
+
+**What it does:**
+If no configured proxy solved the issue, scans local ports 8080, 3128, and 8888
+looking for an undeclared proxy.
+
+**How:**
+Uses `asyncio.open_connection()` with a 0.5s timeout per port.
+Each open port is validated with a real HTTP request through it.
+- HTTP 407 from detected proxy returns `PROXY_AUTH_FAILED`.
+- Working detected proxy returns `PROXY_REQUIRED`.
+- Non-proxy/open unrelated ports are ignored.
+
+**Outcome:** `PROXY_AUTH_FAILED`, `PROXY_REQUIRED`, or proceeds.
 
 ---
 
@@ -323,4 +320,3 @@ The result contains:
 ## License
 
 MIT — see [LICENSE](LICENSE)
-
